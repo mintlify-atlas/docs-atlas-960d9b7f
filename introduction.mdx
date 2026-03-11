@@ -16,10 +16,11 @@ description: "The robotics framework for the foundation model era"
   </p>
 </div>
 
-## Three commands. Any robot. Any policy.
+## Simple CLI. Any robot. Any policy.
 
 ```bash
 rfx record --robot so101 --repo-id my-org/demos --episodes 10
+rfx train --data demos/ --config train.yaml
 rfx deploy runs/my-policy --robot so101
 rfx deploy hf://user/my-policy --robot go2 --duration 60
 ```
@@ -44,8 +45,8 @@ rfx deploy hf://user/my-policy --robot go2 --duration 60
 ROS was built for message passing between components. We're in a different era — the workflow is **collect demos, train a policy, deploy, iterate**. rfx is built from scratch for that loop.
 
 <CardGroup cols={2}>
-  <Card title="Three commands" icon="command">
-    `rfx record`, `rfx deploy`, `rfx doctor` — that's the whole CLI
+  <Card title="Minimal CLI" icon="command">
+    `rfx record`, `rfx train`, `rfx deploy`, `rfx doctor` — focused on the learning workflow
   </Card>
   <Card title="Three-method robot interface" icon="robot">
     `observe()`, `act()`, `reset()` — same API for sim and real

@@ -3,10 +3,11 @@ title: CLI Overview
 description: The rfx command-line interface - three commands for the complete robot learning workflow
 ---
 
-rfx has **three commands**. That's it.
+rfx has a minimal CLI focused on the complete robot learning workflow:
 
 ```bash
 rfx record   # Record demonstrations from hardware
+rfx train    # Train a policy from collected data
 rfx deploy   # Deploy a trained policy to a robot
 rfx doctor   # Check your setup
 ```
@@ -15,6 +16,7 @@ All commands work with `uv run` if you don't have rfx installed globally:
 
 ```bash
 uv run rfx record --robot so101 --repo-id demos --episodes 10
+uv run rfx train --data demos/ --config train.yaml
 uv run rfx deploy runs/my-policy --robot so101
 uv run rfx doctor
 ```
@@ -24,17 +26,20 @@ uv run rfx doctor
 The CLI is designed for the foundation model era workflow:
 
 1. **Collect demos** with `rfx record`
-2. **Train a policy** (using your framework of choice)
+2. **Train a policy** with `rfx train`
 3. **Deploy to hardware** with `rfx deploy`
 4. **Iterate**
 
 Each command does exactly one thing and does it well.
 
-## Three Commands
+## Core Commands
 
-<CardGroup cols={3}>
+<CardGroup cols={2}>
   <Card title="record" icon="circle-dot" href="/cli/record">
     Collect teleoperation demonstrations into LeRobot datasets
+  </Card>
+  <Card title="train" icon="brain" href="/cli/train">
+    Train a policy from collected demonstration data
   </Card>
   <Card title="deploy" icon="rocket" href="/cli/deploy">
     Load a trained policy and run it on hardware

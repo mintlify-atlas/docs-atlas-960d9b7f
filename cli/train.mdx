@@ -1,0 +1,180 @@
+---
+title: rfx train
+description: Train a policy from collected demonstration data
+---
+
+## Overview
+
+The `rfx train` command executes a training stage and registers the resulting artifact in the run registry. It integrates with the rfx workflow system to track training runs, configurations, and outputs.
+
+## Usage
+
+```bash
+rfx train [OPTIONS]
+```
+
+## Options
+
+<ParamField path="--data" type="string" default="None">
+  Path to training data directory or dataset. This can be a local LeRobot dataset directory or a reference to data stored elsewhere.
+</ParamField>
+
+<ParamField path="--config" type="string" default="None">
+  Path to training configuration file (YAML or JSON). The config file specifies hyperparameters, model architecture, and training settings.
+</ParamField>
+
+<ParamField path="--input" type="string" default="[]">
+  Additional input references (repeatable). Use this flag multiple times to specify additional inputs for the training stage.
+  
+  Example: `--input path/to/pretrained.pth --input path/to/normalization.json`
+</ParamField>
+
+<ParamField path="--output" type="string" default="[]">
+  Additional output references (repeatable). Specify where to save additional training artifacts beyond the default policy checkpoint.
+  
+  Example: `--output checkpoints/ --output logs/`
+</ParamField>
+
+## Examples
+
+### Basic training
+
+Train a policy from a local dataset:
+
+```bash
+rfx train --data datasets/my-demos --config configs/train.yaml
+```
+
+### Training with additional inputs
+
+Use a pretrained model as starting point:
+
+```bash
+rfx train \
+  --data datasets/my-demos \
+  --config configs/train.yaml \
+  --input runs/pretrained-base/policy
+```
+
+### Specifying custom outputs
+
+Save checkpoints to a custom location:
+
+```bash
+rfx train \
+  --data datasets/my-demos \
+  --config configs/train.yaml \
+  --output checkpoints/experiment-1/
+```
+
+## Training Workflow
+
+The `train` command:
+
+1. **Generates a unique run ID** - Creates a timestamped identifier for this training run
+2. **Snapshots the config** - Captures the complete training configuration for reproducibility
+3. **Executes the training stage** - Runs the training script defined in your workflow
+4. **Registers the run** - Records metadata, config, inputs, outputs, and artifacts in the run registry
+5. **Reports results** - Prints run ID, status, and artifact locations
+
+## Output
+
+The command prints the training run details:
+
+```
+[rfx] train run_id=train-20240311-123456 status=succeeded
+[rfx] artifact: runs/train-20240311-123456/policy
+[rfx] artifact: runs/train-20240311-123456/checkpoints
+```
+
+## Configuration File Format
+
+Training configuration files can specify:
+
+```yaml configs/train.yaml
+# Model architecture
+model:
+  type: "mlp"
+  hidden_dim: 256
+  num_layers: 3
+
+# Training hyperparameters
+training:
+  learning_rate: 3e-4
+  batch_size: 64
+  num_epochs: 100
+  
+# Data settings
+data:
+  train_split: 0.9
+  shuffle: true
+  
+# Hardware
+device: "cuda"
+num_workers: 4
+```
+
+## Run Registry
+
+After training, query your runs:
+
+```bash
+# List all training runs
+rfx runs list --stage train
+
+# Show details of a specific run
+rfx runs show train-20240311-123456
+```
+
+The registry tracks:
+- Run ID and timestamp
+- Training configuration (for reproducibility)
+- Input data and model references
+- Output artifacts and checkpoints
+- Training metrics and logs
+- Success/failure status
+
+## Integration with Workflows
+
+The `train` command integrates with the rfx workflow system. You can define custom training stages in your workflow configuration that handle:
+
+- Different model architectures
+- Various training algorithms (behavioral cloning, RL, etc.)
+- Multi-stage training pipelines
+- Distributed training
+- Hyperparameter optimization
+
+See the [Train Policy workflow guide](/workflows/train-policy) for detailed examples.
+
+## Troubleshooting
+
+### Missing data directory
+
+```
+[rfx] Train failed: FileNotFoundError: Dataset not found at 'datasets/my-demos'
+```
+
+Ensure the dataset path exists and contains valid LeRobot data. Use `rfx record` to collect demonstrations first.
+
+### Invalid configuration
+
+```
+[rfx] Train failed: ValueError: Invalid config key 'model.typpo'
+```
+
+Check your YAML/JSON syntax and ensure all config keys are valid for your training workflow.
+
+### Out of memory
+
+If training fails with CUDA out of memory errors:
+- Reduce `batch_size` in your config
+- Decrease model size (`hidden_dim`, `num_layers`)
+- Use gradient accumulation
+- Enable mixed precision training
+
+## See Also
+
+- [Record command](/cli/record) - Collect demonstration data
+- [Deploy command](/cli/deploy) - Run trained policies on hardware
+- [Train Policy workflow](/workflows/train-policy) - Detailed training guide
+- [Hub Integration](/workflows/hub-integration) - Push models to HuggingFace Hub

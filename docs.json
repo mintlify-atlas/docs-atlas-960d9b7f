@@ -50,6 +50,7 @@
             "pages": [
               "cli/overview",
               "cli/record",
+              "cli/train",
               "cli/deploy",
               "cli/doctor"
             ]
