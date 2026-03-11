@@ -1,0 +1,419 @@
+---
+title: rfxJIT Compiler
+description: Performance-critical kernel compilation and optimization for robotics workloads
+---
+
+## Overview
+
+rfxJIT is a lightweight JIT compiler for robotics computation kernels. It provides:
+
+- **Typed kernel IR** for elementwise operations
+- **Optimization passes** (constant folding, dead-code elimination, fusion)
+- **Multi-backend codegen** for CPU, CUDA, and Metal
+- **Functional transforms** (autodiff, value_and_grad)
+- **TinyJIT-style caching** for Python expression capture
+
+Inspired by PyTorch (ergonomics), JAX (functional transforms), and TVM (scheduling), rfxJIT stays intentionally tiny and hackable.
+
+<Info>
+rfxJIT is experimental. It focuses on control-related kernels (PID, filters, kinematics) rather than large neural networks.
+</Info>
+
+## Architecture
+
+```text
+┌─────────────────────────────────────────────┐
+│         Python Front-End (rfx)              │
+│   (tinygrad for NN, rfxJIT for control)     │
+└─────────────────────────────────────────────┘
+                     │
+┌─────────────────────────────────────────────┐
+│            Kernel IR Layer                  │
+│  - Typed operations (Add, Mul, Sin, etc.)   │
+│  - Function-level capture via trace API     │
+└─────────────────────────────────────────────┘
+                     │
+┌─────────────────────────────────────────────┐
+│         Optimization Passes                 │
+│  - Constant folding                         │
+│  - Dead-op elimination                      │
+│  - Chain fusion                             │
+└─────────────────────────────────────────────┘
+                     │
+┌─────────────────────────────────────────────┐
+│            Lowering Layer                   │
+│  - Slot-based executable form               │
+│  - Backend compiler (cpu/cuda/metal)        │
+└─────────────────────────────────────────────┘
+                     │
+┌─────────────────────────────────────────────┐
+│         Runtime Execution                   │
+│  - Interpreter (reference)                  │
+│  - Executor (lowered kernels)               │
+│  - Dispatch queue (single-worker)           │
+└─────────────────────────────────────────────┘
+```
+
+## Kernel IR
+
+The kernel IR is defined in `rfxJIT/kernels/ir.py`. Each operation is a typed node:
+
+```python
+from rfxJIT.kernels.ir import Kernel, Input, Add, Mul, Sin, Const
+
+# Define a kernel: f(x, y) = sin(x * 2) + y
+kernel = Kernel(
+    inputs=[Input("x", dtype="float32"), Input("y", dtype="float32")],
+    ops=[
+        Const(2.0, dtype="float32"),
+        Mul(Input("x"), Const(2.0)),
+        Sin(Mul(Input("x"), Const(2.0))),
+        Add(Sin(...), Input("y"))
+    ],
+    output=Add(...)
+)
+```
+
+<Note>
+The IR is explicit and immutable. Each operation produces a new node rather than mutating state.
+</Note>
+
+## Optimization Passes
+
+rfxJIT applies optimization passes before lowering:
+
+### Constant Folding
+
+```python
+from rfxJIT.kernels.optimize import constant_fold
+
+# Before: Add(Const(1.0), Const(2.0))
+# After:  Const(3.0)
+optimized = constant_fold(kernel)
+```
+
+### Dead-Code Elimination
+
+```python
+from rfxJIT.kernels.optimize import eliminate_dead_ops
+
+# Removes operations not reachable from output
+cleaned = eliminate_dead_ops(kernel)
+```
+
+### Chain Fusion
+
+```python
+from rfxJIT.kernels.optimize import fuse_chains
+
+# Fuses sequential elementwise operations
+fused = fuse_chains(kernel)
+```
+
+### Full Optimization Pipeline
+
+```python
+from rfxJIT.kernels.optimize import optimize
+
+# Apply all optimization passes
+optimized_kernel = optimize(kernel)
+print(f"Reduced from {len(kernel.ops)} to {len(optimized_kernel.ops)} ops")
+```
+
+## Lowering and Execution
+
+Lower kernels to slot-based executable form for fast execution:
+
+```python
+from rfxJIT.kernels.lowering import lower_kernel
+from rfxJIT.runtime.executor import execute_lowered
+
+# Lower to executable form
+lowered = lower_kernel(kernel)
+
+# Execute with inputs
+import numpy as np
+x = np.array([0.0, 1.0, 2.0], dtype=np.float32)
+y = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+
+result = execute_lowered(lowered, inputs={"x": x, "y": y}, backend="cpu")
+print(result)
+# Output: array([1.0, 2.9092975, 3.9092975], dtype=float32)
+```
+
+### Backend Selection
+
+Supported backends:
+
+- `cpu`: NumPy-based reference implementation
+- `cuda`: CUDA kernels (requires GPU)
+- `metal`: Metal Performance Shaders (macOS/iOS)
+
+```python
+# CPU backend (default)
+result_cpu = execute_lowered(lowered, inputs, backend="cpu")
+
+# CUDA backend (if available)
+result_cuda = execute_lowered(lowered, inputs, backend="cuda")
+
+# Metal backend (macOS)
+result_metal = execute_lowered(lowered, inputs, backend="metal")
+```
+
+## TinyJIT Transform
+
+Capture Python expressions and cache compiled kernels:
+
+```python
+from rfxJIT.runtime.tinyjit import jit
+import numpy as np
+
+@jit
+def compute(x, y):
+    return np.sin(x * 2.0) + y
+
+# First call: traces and compiles
+result1 = compute(np.array([1.0, 2.0]), np.array([0.5, 1.0]))
+
+# Subsequent calls: uses cached kernel
+result2 = compute(np.array([3.0, 4.0]), np.array([1.5, 2.0]))
+```
+
+<Tip>
+The `@jit` decorator caches kernels based on input shapes and dtypes. Recompilation only occurs when the trace changes.
+</Tip>
+
+## Autodiff Transforms
+
+Automatic differentiation over kernel IR:
+
+```python
+from rfxJIT.kernels.trace import trace
+from rfxJIT.transforms import grad, value_and_grad
+import numpy as np
+
+# Define a loss function
+def loss_fn(x):
+    return np.sum(x ** 2)
+
+# Compute gradient
+grad_fn = grad(loss_fn)
+x = np.array([1.0, 2.0, 3.0])
+dx = grad_fn(x)
+print(dx)  # [2.0, 4.0, 6.0]
+
+# Compute both value and gradient
+value_and_grad_fn = value_and_grad(loss_fn)
+value, dx = value_and_grad_fn(x)
+print(value, dx)  # 14.0, [2.0, 4.0, 6.0]
+```
+
+<Info>
+Autodiff is implemented via IR-level reverse-mode differentiation. It supports elementwise operations, reductions, and control flow.
+</Info>
+
+## Benchmarking
+
+Run performance benchmarks:
+
+```bash
+python -m rfxJIT.runtime.benchmark \
+  --size 65536 \
+  --iterations 200 \
+  --backend cpu \
+  --json-out /tmp/rfxjit-current.json
+```
+
+Compare against tracked baselines:
+
+```bash
+bash scripts/perf-check.sh \
+  --baseline docs/perf/baselines/rfxjit_microkernels_cpu.json \
+  --output /tmp/rfxjit-current.json \
+  --backend cpu \
+  --threshold-pct 10
+```
+
+<CodeGroup>
+```bash Benchmark Output
+Benchmarking elementwise kernels (size=65536, iterations=200)
+[cpu] add: 0.032ms avg, 6250 ops/s
+[cpu] mul: 0.031ms avg, 6452 ops/s
+[cpu] sin: 0.089ms avg, 2247 ops/s
+[cpu] fused_chain: 0.045ms avg, 4444 ops/s
+
+Optimization impact:
+  - Reduced ops: 12 -> 8 (33% reduction)
+  - Fused chains: 3
+```
+
+```json Benchmark JSON
+{
+  "backend": "cpu",
+  "size": 65536,
+  "iterations": 200,
+  "results": {
+    "add": {"avg_ms": 0.032, "ops_per_sec": 6250},
+    "mul": {"avg_ms": 0.031, "ops_per_sec": 6452},
+    "sin": {"avg_ms": 0.089, "ops_per_sec": 2247}
+  }
+}
+```
+</CodeGroup>
+
+## Development Status
+
+rfxJIT is under active development. Current phase status:
+
+### Phase 0: IR Foundation ✅
+
+- Typed elementwise kernel IR (`rfxJIT/kernels/ir.py`)
+- Reference interpreter (`rfxJIT/runtime/interpreter.py`)
+- Benchmark harness (`rfxJIT/runtime/benchmark.py`)
+- Tests (`rfxJIT/tests/test_ir.py`)
+
+### Phase 1: Lowering and Execution ✅
+
+- IR lowering to slot-based form (`rfxJIT/kernels/lowering.py`)
+- Lowered-kernel executor with backend compiler (`rfxJIT/runtime/executor.py`)
+- Single-worker dispatch queue (`rfxJIT/runtime/queue.py`)
+- Tests (`rfxJIT/tests/test_lowering_queue.py`)
+
+### Phase 2: Optimization ✅
+
+- Optimization passes (`rfxJIT/kernels/optimize.py`)
+- Constant folding, dead-op elimination, chain fusion
+- Tests (`rfxJIT/tests/test_optimize.py`)
+- Benchmark reports op count before/after optimization
+
+### Phase 3: Transforms ✅
+
+- Tracer API for Python expression capture (`rfxJIT/kernels/trace.py`)
+- TinyJIT-style cache+replay runtime (`rfxJIT/runtime/tinyjit.py`)
+- IR autodiff + functional transforms (`grad`, `value_and_grad`)
+- Tests (`rfxJIT/tests/test_tinyjit.py`, `rfxJIT/tests/test_grad_transforms.py`)
+
+### Phase 4: Advanced Features 🚧
+
+- [ ] Multi-dimensional array support (broadcasting, indexing)
+- [ ] Control flow primitives (if/while)
+- [ ] GPU kernel fusion and scheduling
+- [ ] Beam-search-style kernel exploration
+
+## Repository Layout
+
+rfxJIT lives in the `rfxJIT/` directory:
+
+```text
+rfxJIT/
+├── notes/              # Architecture notes and design records
+├── runtime/
+│   ├── interpreter.py  # Reference interpreter
+│   ├── executor.py     # Lowered-kernel executor
+│   ├── queue.py        # Dispatch queue
+│   ├── tinyjit.py      # JIT cache+replay runtime
+│   └── benchmark.py    # Benchmark harness
+├── kernels/
+│   ├── ir.py           # Kernel IR definitions
+│   ├── lowering.py     # IR lowering to executable form
+│   ├── optimize.py     # Optimization passes
+│   └── trace.py        # Tracer API for Python capture
+├── tests/
+│   ├── test_ir.py
+│   ├── test_lowering_queue.py
+│   ├── test_optimize.py
+│   ├── test_tinyjit.py
+│   └── test_grad_transforms.py
+├── ROADMAP.md          # Milestone plan
+└── README.md           # This file
+```
+
+## Comparison to Other Frameworks
+
+<AccordionGroup>
+  <Accordion title="PyTorch" icon="fire">
+    **Similar:** Eager Tensor API, autograd, optim, basic datasets/layers
+    
+    **Different:** rfxJIT's full compiler and IR are visible and easy to modify. PyTorch's backend is complex and opaque.
+  </Accordion>
+  
+  <Accordion title="JAX" icon="j">
+    **Similar:** IR-based autodiff over primitives, function-level JIT via TinyJIT-style capture
+    
+    **Different:** Fewer transforms today (no full `vmap`/`pmap` yet), but much smaller and easier to read.
+  </Accordion>
+  
+  <Accordion title="TVM" icon="t">
+    **Similar:** Multiple lowering passes, scheduling, beam-search-style kernel exploration, device graph batched execution
+    
+    **Different:** rfxJIT is coupled with a front-end framework (rfx) rather than only being a compiler stack.
+  </Accordion>
+</AccordionGroup>
+
+## Integration with rfx
+
+Use rfxJIT for performance-critical control kernels:
+
+```python
+import rfx
+import numpy as np
+from rfxJIT.runtime.tinyjit import jit
+
+# Define PID control kernel
+@jit
+def pid_update(error, integral, derivative, kp, ki, kd):
+    output = kp * error + ki * integral + kd * derivative
+    return np.clip(output, -1.0, 1.0)
+
+# Use in control loop
+go2 = rfx.Go2.connect()
+integral = 0.0
+prev_error = 0.0
+
+def control_callback(iter, dt):
+    global integral, prev_error
+    
+    state = go2.state()
+    setpoint = 0.0  # Desired position
+    measurement = state.imu.pitch
+    
+    error = setpoint - measurement
+    integral += error * dt
+    derivative = (error - prev_error) / dt
+    
+    output = pid_update(
+        np.array([error]),
+        np.array([integral]),
+        np.array([derivative]),
+        kp=0.5, ki=0.1, kd=0.05
+    )
+    
+    go2.walk(output[0], 0, 0)
+    prev_error = error
+    return True
+
+rfx.run_control_loop(rate_hz=100, callback=control_callback)
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Profile First" icon="chart-line">
+    Use the benchmark harness to identify hot kernels before optimizing.
+  </Card>
+  <Card title="Keep Kernels Small" icon="cube">
+    rfxJIT excels at small, elementwise kernels. Use tinygrad for large neural networks.
+  </Card>
+  <Card title="Use Type Hints" icon="code">
+    Explicit dtypes improve IR generation and backend selection.
+  </Card>
+  <Card title="Test Numerics" icon="flask">
+    Compare JIT results against reference implementations to catch bugs.
+  </Card>
+</CardGroup>
+
+## See Also
+
+- [Control Loops](/core-concepts/control) - Integrate JIT kernels into real-time control
+- [Rust Core](/advanced/rust-core) - Understand the performance-critical Rust layer
+- [rfxJIT ROADMAP](https://github.com/quantbagel/rfx/blob/main/rfxJIT/ROADMAP.md) - Development roadmap

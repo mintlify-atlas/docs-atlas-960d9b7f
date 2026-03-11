@@ -1,0 +1,307 @@
+---
+title: "rfx.nn"
+description: "Neural network primitives using tinygrad"
+---
+
+The `rfx.nn` module provides simple, transparent policy implementations using tinygrad tensors. Follows the tinygrad philosophy: simple to start, powerful enough for production.
+
+```python
+from rfx.nn import MLP, go2_mlp
+
+policy = go2_mlp()
+obs = Tensor.randn(1, 48)
+actions = policy(obs)  # JIT compiled on second call
+```
+
+## Base Classes
+
+### Policy
+
+Base policy class for neural network policies. Users can subclass this to create custom architectures.
+
+```python
+from rfx.nn import Policy
+from tinygrad import Tensor
+from tinygrad.nn import Linear
+
+class CustomPolicy(Policy):
+    def __init__(self):
+        self.l1 = Linear(48, 256)
+        self.l2 = Linear(256, 12)
+
+    def forward(self, obs: Tensor) -> Tensor:
+        x = self.l1(obs).tanh()
+        return self.l2(x).tanh()
+```
+
+#### Methods
+
+**`forward(obs)`**
+
+Forward pass: observations → actions. Subclasses must implement this.
+
+<ParamField path="obs" type="Tensor">
+  Observation tensor of shape `(batch, obs_dim)`.
+</ParamField>
+
+**Returns:** `Tensor` - Action tensor of shape `(batch, act_dim)`.
+
+---
+
+**`__call__(obs)`**
+
+Run inference (JIT compiled after first call).
+
+<ParamField path="obs" type="Tensor">
+  Observation tensor.
+</ParamField>
+
+**Returns:** `Tensor` - Action tensor.
+
+---
+
+**`save(path, *, robot_config=None, normalizer=None, training_info=None)`**
+
+Save policy as a self-describing directory.
+
+<ParamField path="path" type="str | Path" required>
+  Directory path to save into.
+</ParamField>
+
+<ParamField path="robot_config" type="RobotConfig | None">
+  Optional RobotConfig to bundle.
+</ParamField>
+
+<ParamField path="normalizer" type="ObservationNormalizer | None">
+  Optional ObservationNormalizer to bundle.
+</ParamField>
+
+<ParamField path="training_info" type="dict[str, Any] | None">
+  Optional training metadata dict.
+</ParamField>
+
+**Returns:** `Path` - The directory path.
+
+---
+
+**`Policy.load(path)` (classmethod)**
+
+Load a self-describing policy from a directory.
+
+<ParamField path="path" type="str | Path" required>
+  Directory path or legacy `.safetensors` file.
+</ParamField>
+
+**Returns:** `Policy` - Policy instance with loaded weights.
+
+---
+
+## Policy Networks
+
+### MLP
+
+Multi-layer perceptron policy with tanh activations. Suitable for most locomotion tasks.
+
+```python
+from rfx.nn import MLP
+from tinygrad import Tensor
+
+policy = MLP(obs_dim=48, act_dim=12, hidden=[256, 256])
+obs = Tensor.randn(1, 48)
+actions = policy(obs)
+print(actions.shape)  # (1, 12)
+```
+
+<ParamField path="obs_dim" type="int" required>
+  Observation dimension.
+</ParamField>
+
+<ParamField path="act_dim" type="int" required>
+  Action dimension.
+</ParamField>
+
+<ParamField path="hidden" type="list[int] | None" default="[256, 256]">
+  List of hidden layer sizes.
+</ParamField>
+
+---
+
+### JitPolicy
+
+A policy wrapper that enables TinyJit compilation for faster inference. The first call traces the computation graph, subsequent calls are fast.
+
+```python
+from rfx.nn import MLP, JitPolicy
+
+mlp = MLP(48, 12)
+jit_policy = JitPolicy(mlp)
+
+# First call: traces graph
+actions = jit_policy(obs)
+
+# Second call: runs compiled kernel
+actions = jit_policy(obs)
+```
+
+<ParamField path="policy" type="Policy" required>
+  The policy to wrap.
+</ParamField>
+
+**Note:** Save/load delegates to the inner policy — JIT compilation state is re-created on load automatically.
+
+---
+
+### ActorCritic
+
+Actor-critic network for PPO training. Shares a backbone between actor (policy) and critic (value function).
+
+```python
+from rfx.nn import ActorCritic
+from tinygrad import Tensor
+
+ac = ActorCritic(48, 12)
+obs = Tensor.randn(32, 48)
+actions, values = ac.forward_actor_critic(obs)
+```
+
+<ParamField path="obs_dim" type="int" required>
+  Observation dimension.
+</ParamField>
+
+<ParamField path="act_dim" type="int" required>
+  Action dimension.
+</ParamField>
+
+<ParamField path="hidden" type="list[int] | None" default="[256, 256]">
+  Hidden layer sizes for shared backbone.
+</ParamField>
+
+#### Methods
+
+**`forward_actor_critic(obs)`**
+
+Get both actions and values (for training).
+
+<ParamField path="obs" type="Tensor">
+  Observation tensor.
+</ParamField>
+
+**Returns:** `tuple[Tensor, Tensor]` - Tuple of `(action_mean, value)`.
+
+---
+
+**`get_action_and_value(obs, action=None)`**
+
+Sample action and compute log prob + entropy (for PPO update).
+
+<ParamField path="obs" type="Tensor">
+  Observations.
+</ParamField>
+
+<ParamField path="action" type="Tensor | None">
+  Optional pre-sampled action (for computing log prob).
+</ParamField>
+
+**Returns:** `tuple[Tensor, Tensor, Tensor, Tensor]` - Tuple of `(action, log_prob, entropy, value)`.
+
+---
+
+### TorchJitPolicy
+
+Policy wrapper for PyTorch TorchScript (`.pt`) models. Loads a model saved with `torch.jit.save()` and exposes it through the standard rfx Policy interface.
+
+```python
+from rfx.nn import TorchJitPolicy
+
+policy = TorchJitPolicy(
+    model_path="model.pt",
+    obs_keys=["state"],
+    device="cpu"
+)
+
+obs = {"state": torch.randn(1, 48)}
+actions = policy(obs)
+```
+
+<ParamField path="model_path" type="str | Path | None">
+  Path to the `.pt` TorchScript file.
+</ParamField>
+
+<ParamField path="obs_keys" type="list[str] | None" default="['state']">
+  Observation dict keys to concatenate as model input.
+</ParamField>
+
+<ParamField path="device" type="str" default="'cpu'">
+  Torch device string.
+</ParamField>
+
+**Note:** Accepts `dict[str, torch.Tensor]` observations directly — no tinygrad conversion.
+
+---
+
+## Convenience Constructors
+
+### go2_mlp
+
+Create an MLP policy sized for the Go2 robot.
+
+- Go2 observation space: 48 dimensions
+- Go2 action space: 12 dimensions (joint positions)
+
+```python
+from rfx.nn import go2_mlp
+
+policy = go2_mlp()  # Uses [256, 256] hidden layers
+policy = go2_mlp(hidden=[512, 512])  # Custom hidden sizes
+```
+
+<ParamField path="hidden" type="list[int] | None" default="[256, 256]">
+  Hidden layer sizes.
+</ParamField>
+
+**Returns:** `MLP` - MLP policy for Go2.
+
+---
+
+### go2_actor_critic
+
+Create an ActorCritic network sized for the Go2 robot.
+
+```python
+from rfx.nn import go2_actor_critic
+
+ac = go2_actor_critic()
+ac = go2_actor_critic(hidden=[512, 512])  # Custom hidden sizes
+```
+
+<ParamField path="hidden" type="list[int] | None" default="[256, 256]">
+  Hidden layer sizes.
+</ParamField>
+
+**Returns:** `ActorCritic` - ActorCritic network for Go2.
+
+---
+
+## Utilities
+
+### register_policy
+
+Register a policy class for auto-detection during load.
+
+```python
+from rfx.nn import Policy, register_policy
+
+@register_policy
+class CustomPolicy(Policy):
+    def __init__(self, obs_dim, act_dim):
+        ...
+
+    def forward(self, obs):
+        ...
+```
+
+<ParamField path="cls" type="type[Policy]" required>
+  Policy class to register.
+</ParamField>
+
+**Returns:** `type[Policy]` - The same class (decorator).

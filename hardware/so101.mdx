@@ -1,0 +1,390 @@
+---
+title: SO-101 6-DOF Arm
+description: Complete guide to the SO-101 robotic arm with rfx
+---
+
+## Overview
+
+The **SO-101** is a 6-DOF robotic arm with Feetech serial bus servos. rfx provides first-class support with auto-discovery, leader-follower teleoperation, and built-in dataset collection.
+
+- **Control frequency**: 50 Hz
+- **Interface**: USB serial (Feetech bus protocol)
+- **State**: 12-dim (6 positions + 6 velocities)
+- **Actions**: 6-dim (joint position commands)
+
+## Quick Start
+
+### 1. Setup (First Time)
+
+From the rfx repository root:
+
+```bash
+bash scripts/setup-from-source.sh
+```
+
+### 2. Check Environment
+
+```bash
+rfx doctor-so101
+```
+
+This validates:
+- Python/uv availability
+- Detected serial ports
+- `torch`, `yaml`, `rfx` imports
+- Rust bindings (`rfx._rfx`)
+
+### 3. Configure Motor IDs and Baudrate
+
+<Warning>
+Run this **once** on a new SO-101 to normalize servo IDs and set the baudrate to 1 Mbps.
+</Warning>
+
+```bash
+rfx so101-setup --normalize-ids --set-baud-1m
+```
+
+Or run the script directly:
+
+```bash
+.venv/bin/python scripts/so101-setup.py --normalize-ids --set-baud-1m
+```
+
+### 4. Run the Demo
+
+Auto-detect port:
+
+```bash
+rfx so101-demo --port auto
+```
+
+Explicit port:
+
+```bash
+rfx so101-demo --port /dev/ttyACM0
+```
+
+The demo will:
+1. Connect to the SO-101
+2. Reset to home position
+3. Execute a gentle sinusoidal motion
+4. Return home on exit
+
+## Python API
+
+### Basic Usage
+
+```python
+from rfx.robot import lerobot
+
+robot = lerobot.so101(port="/dev/ttyACM0")
+robot.reset()
+obs = robot.observe()
+robot.disconnect()
+```
+
+### RealRobot Interface
+
+```python
+from rfx import RealRobot
+
+# From config file
+robot = RealRobot.from_config("so101.yaml")
+
+# Auto-discover port
+robot = RealRobot.from_config("so101.yaml", port=None)
+
+# Explicit port
+robot = RealRobot.from_config("so101.yaml", port="/dev/ttyACM0")
+
+obs = robot.observe()
+robot.act(action)  # action: Tensor(1, 64)
+robot.reset()
+robot.disconnect()
+```
+
+### Observation Structure
+
+```python
+obs = robot.observe()
+# {
+#   "state": Tensor(1, 64),  # padded from 12-dim (6 pos + 6 vel)
+# }
+
+# Extract actual joint data
+positions = obs["state"][0, :6]      # joint positions
+velocities = obs["state"][0, 6:12]   # joint velocities
+```
+
+### Named Joint Control
+
+Use `MotorCommands` for semantic joint control:
+
+```python
+import rfx
+from rfx.robot.config import SO101_CONFIG
+
+action = rfx.MotorCommands(
+    {"gripper": 0.8, "wrist_pitch": -0.2},
+    config=SO101_CONFIG,
+).to_tensor()
+
+robot.act(action)
+```
+
+### Joint Names and Indices
+
+| Joint | Index | Range |
+|-------|-------|-------|
+| `shoulder_pan` | 0 | -π to π |
+| `shoulder_lift` | 1 | -1.57 to 1.57 |
+| `elbow` | 2 | -2.0 to 2.0 |
+| `wrist_pitch` | 3 | -1.57 to 1.57 |
+| `wrist_roll` | 4 | -π to π |
+| `gripper` | 5 | 0.0 to 1.0 |
+
+## Bimanual Setup (2 Arms)
+
+rfx supports **leader-follower teleoperation** with two SO-101 arms.
+
+### Auto-Discovery
+
+```bash
+rfx so101-bimanual
+```
+
+On first run, you'll see an **interactive mapping wizard**:
+
+1. Unplug both USB adapters
+2. Plug only the **leader** arm → press Enter
+3. Plug the **follower** arm → press Enter
+
+The mapping is saved to `~/.config/rfx/so101_port_map.json` and persists across reboots.
+
+<Tip>
+To skip the wizard and use deterministic port assignment:
+```bash
+export RFX_SO101_INTERACTIVE_MAP=0
+```
+</Tip>
+
+### Python API
+
+```python
+from rfx.real import So101LeaderFollower
+
+# Auto-discover both ports
+teleop = So101LeaderFollower()
+
+# Or specify explicitly
+teleop = So101LeaderFollower(
+    leader_port="/dev/ttyACM0",
+    follower_port="/dev/ttyACM1"
+)
+
+# Run mirroring loop
+teleop.run()  # Ctrl+C to stop
+
+# Or step manually
+positions = teleop.step()  # read leader, mirror to follower
+teleop.disconnect()
+```
+
+### Bimanual Configuration
+
+Default config: `rfx/configs/so101_bimanual.yaml`
+
+```yaml
+rate_hz: 350.0
+output_dir: demos
+
+arm_pairs:
+  - name: left
+    leader_port: /dev/ttyACM0
+    follower_port: /dev/ttyACM1
+  - name: right
+    leader_port: /dev/ttyACM2
+    follower_port: /dev/ttyACM3
+
+cameras:
+  - name: cam0
+    device_id: 0
+    fps: 30
+  - name: cam1
+    device_id: 1
+    fps: 30
+```
+
+## Dataset Collection
+
+### LeRobot Export
+
+Collect demos with automatic LeRobot dataset export:
+
+```bash
+rfx collect \
+  --repo-id your-org/so101-demos \
+  --robot-type so101 \
+  --episodes 5 \
+  --duration 30 \
+  --collection-root datasets
+```
+
+### Teleoperation Recording
+
+Record bimanual teleoperation with export options:
+
+```bash
+# LeRobot only
+uv run rfx/examples/teleop_record.py \
+  --config rfx/configs/so101_bimanual.yaml \
+  --export-format lerobot \
+  --lerobot-repo-id your/repo
+
+# MCAP only
+uv run rfx/examples/teleop_record.py \
+  --config rfx/configs/so101_bimanual.yaml \
+  --export-format mcap
+
+# Both formats
+uv run rfx/examples/teleop_record.py \
+  --config rfx/configs/so101_bimanual.yaml \
+  --export-format both \
+  --lerobot-repo-id your/repo
+```
+
+## Internal Architecture
+
+The SO-101 backend uses a **Rust RobotNode** for hardware I/O:
+
+```python
+from rfx.real.so101 import So101Backend
+from rfx.robot.config import SO101_CONFIG
+
+backend = So101Backend(
+    config=SO101_CONFIG,
+    port="/dev/ttyACM0",
+    baudrate=1_000_000,
+    is_leader=False,
+)
+
+obs = backend.observe()  # reads from Zenoh subscription
+backend.act(action)      # publishes command to transport
+backend.disconnect()
+```
+
+Key points:
+
+- Python **never** touches serial directly
+- Rust `RobotNode` owns the serial connection
+- State published on `rfx/{name}/state`
+- Commands consumed from `rfx/{name}/cmd`
+- All I/O flows through the **Zenoh transport pipeline**
+
+### Port Auto-Discovery
+
+The backend auto-detects Feetech USB adapters:
+
+```python
+from rfx.real.so101 import So101Robot
+
+robot = So101Robot()  # auto-discovers port
+robot = So101Robot("/dev/ttyACM0")  # explicit port
+```
+
+See `rfx/python/rfx/real/so101.py:146` for the port discovery implementation.
+
+## Configuration File
+
+Full config: `rfx/configs/so101.yaml`
+
+```yaml
+name: SO-101
+state_dim: 12      # 6 positions + 6 velocities
+action_dim: 6      # 6 joint position commands
+max_state_dim: 64
+max_action_dim: 64
+control_freq_hz: 50
+
+joints:
+  - name: shoulder_pan
+    index: 0
+    position_min: -3.14159
+    position_max: 3.14159
+  - name: shoulder_lift
+    index: 1
+    position_min: -1.57
+    position_max: 1.57
+  - name: elbow
+    index: 2
+    position_min: -2.0
+    position_max: 2.0
+  - name: wrist_pitch
+    index: 3
+    position_min: -1.57
+    position_max: 1.57
+  - name: wrist_roll
+    index: 4
+    position_min: -3.14159
+    position_max: 3.14159
+  - name: gripper
+    index: 5
+    position_min: 0.0
+    position_max: 1.0
+
+cameras:
+  - name: wrist_camera
+    width: 640
+    height: 480
+    fps: 30
+    device_id: 0
+
+hardware:
+  port: /dev/ttyACM0
+  baudrate: 1000000
+```
+
+## Troubleshooting
+
+### Port Not Found
+
+If `rfx doctor-so101` doesn't detect any ports:
+
+1. Check USB connection
+2. Verify permissions: `sudo usermod -aG dialout $USER` (log out and back in)
+3. List all serial devices: `ls -la /dev/tty*`
+
+### Multiple Ports Detected
+
+If multiple SO-101s are connected, rfx will pick the first one. Specify explicitly:
+
+```python
+robot = So101Robot("/dev/ttyACM0")
+```
+
+### Baudrate Mismatch
+
+If the arm doesn't respond, ensure servos are set to 1 Mbps:
+
+```bash
+rfx so101-setup --set-baud-1m
+```
+
+### Interactive Wizard on Every Boot
+
+The wizard only runs when:
+1. No saved mapping exists at `~/.config/rfx/so101_port_map.json`
+2. Two SO-101s are connected
+3. `RFX_SO101_INTERACTIVE_MAP` is not disabled
+
+Disable it permanently:
+
+```bash
+echo 'export RFX_SO101_INTERACTIVE_MAP=0' >> ~/.bashrc
+```
+
+## Next Steps
+
+- [Deploy a policy](/workflows/deploy-policy) on the SO-101
+- [Train a policy](/workflows/train-policy) with collected demos
+- [Custom Robots](/hardware/custom-robots) - add your own hardware

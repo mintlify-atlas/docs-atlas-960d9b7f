@@ -1,0 +1,412 @@
+---
+title: "collection"
+description: "LeRobot-native data collection API for robotics datasets"
+---
+
+The `rfx.collection` module provides a simple, LeRobot-native interface for collecting demonstration data from robots and pushing it directly to HuggingFace Hub.
+
+## collect
+
+Collect episodes from a robot into a LeRobot dataset.
+
+```python
+rfx.collection.collect(
+    robot_type: str,
+    repo_id: str,
+    *,
+    output: str | Path = "datasets",
+    episodes: int = 1,
+    duration_s: float | None = None,
+    task: str = "default",
+    fps: int = 30,
+    state_dim: int = 6,
+    camera_names: Sequence[str] = (),
+    push_to_hub: bool = False,
+    mcap: bool = False,
+) -> Dataset
+```
+
+<ParamField path="robot_type" type="str" required>
+  Robot type identifier (e.g., "so101")
+</ParamField>
+
+<ParamField path="repo_id" type="str" required>
+  HuggingFace Hub repository ID (e.g., "my-org/demos")
+</ParamField>
+
+<ParamField path="output" type="str | Path" default="datasets">
+  Local directory to store the dataset
+</ParamField>
+
+<ParamField path="episodes" type="int" default="1">
+  Number of episodes to collect
+</ParamField>
+
+<ParamField path="duration_s" type="float | None" default="None">
+  Duration of each episode in seconds. If None, episodes run until keyboard interrupt.
+</ParamField>
+
+<ParamField path="task" type="str" default="default">
+  Task label for the episodes
+</ParamField>
+
+<ParamField path="fps" type="int" default="30">
+  Frames per second for dataset recording
+</ParamField>
+
+<ParamField path="state_dim" type="int" default="6">
+  Dimensionality of the robot state vector
+</ParamField>
+
+<ParamField path="camera_names" type="Sequence[str]" default="()">
+  Names of cameras to record
+</ParamField>
+
+<ParamField path="push_to_hub" type="bool" default="False">
+  Whether to automatically push the dataset to HuggingFace Hub after collection
+</ParamField>
+
+<ParamField path="mcap" type="bool" default="False">
+  Whether to also write MCAP sidecar files
+</ParamField>
+
+<ResponseField name="return" type="Dataset">
+  The collected dataset
+</ResponseField>
+
+### Example
+
+```python
+import rfx.collection
+
+# Collect 10 episodes and push to hub
+dataset = rfx.collection.collect(
+    "so101",
+    "my-org/demos",
+    episodes=10,
+    push_to_hub=True
+)
+```
+
+## open_dataset
+
+Open an existing local LeRobot dataset.
+
+```python
+rfx.collection.open_dataset(
+    repo_id: str,
+    *,
+    root: str | Path = "datasets"
+) -> Dataset
+```
+
+<ParamField path="repo_id" type="str" required>
+  Repository ID of the dataset
+</ParamField>
+
+<ParamField path="root" type="str | Path" default="datasets">
+  Root directory containing datasets
+</ParamField>
+
+<ResponseField name="return" type="Dataset">
+  The opened dataset
+</ResponseField>
+
+### Example
+
+```python
+import rfx.collection
+
+dataset = rfx.collection.open_dataset("my-org/demos")
+print(f"Episodes: {dataset.num_episodes}")
+print(f"Frames: {dataset.num_frames}")
+```
+
+## Dataset
+
+A LeRobot dataset wrapper with rfx helpers.
+
+### create
+
+Create a new empty dataset.
+
+```python
+Dataset.create(
+    repo_id: str,
+    *,
+    root: str | Path = "datasets",
+    fps: int = 30,
+    robot_type: str = "so101",
+    features: dict[str, Any] | None = None,
+    state_dim: int = 6,
+    camera_names: Sequence[str] = (),
+    camera_shape: tuple[int, int, int] = (480, 640, 3),
+    use_videos: bool = True,
+) -> Dataset
+```
+
+<ParamField path="repo_id" type="str" required>
+  Repository ID for the dataset
+</ParamField>
+
+<ParamField path="root" type="str | Path" default="datasets">
+  Root directory to store the dataset
+</ParamField>
+
+<ParamField path="fps" type="int" default="30">
+  Frames per second
+</ParamField>
+
+<ParamField path="robot_type" type="str" default="so101">
+  Robot type identifier
+</ParamField>
+
+<ParamField path="features" type="dict[str, Any] | None" default="None">
+  Feature specification. If None, auto-built from state_dim and camera_names.
+</ParamField>
+
+<ParamField path="state_dim" type="int" default="6">
+  Dimensionality of the state vector
+</ParamField>
+
+<ParamField path="camera_names" type="Sequence[str]" default="()">
+  Names of cameras in the dataset
+</ParamField>
+
+<ParamField path="camera_shape" type="tuple[int, int, int]" default="(480, 640, 3)">
+  Shape of camera images (height, width, channels)
+</ParamField>
+
+<ParamField path="use_videos" type="bool" default="True">
+  Whether to encode images as videos
+</ParamField>
+
+### open
+
+Open an existing local dataset.
+
+```python
+Dataset.open(
+    repo_id: str,
+    *,
+    root: str | Path = "datasets"
+) -> Dataset
+```
+
+### from_hub
+
+Pull a dataset from HuggingFace Hub.
+
+```python
+Dataset.from_hub(
+    repo_id: str,
+    *,
+    root: str | Path = "datasets"
+) -> Dataset
+```
+
+### push
+
+Push dataset to HuggingFace Hub.
+
+```python
+dataset.push(repo_id: str | None = None) -> None
+```
+
+<ParamField path="repo_id" type="str | None" default="None">
+  Optional repository ID. If None, uses the dataset's existing repo_id.
+</ParamField>
+
+### Properties
+
+<ResponseField name="repo_id" type="str">
+  Repository ID of the dataset
+</ResponseField>
+
+<ResponseField name="num_episodes" type="int">
+  Number of episodes in the dataset
+</ResponseField>
+
+<ResponseField name="num_frames" type="int">
+  Total number of frames in the dataset
+</ResponseField>
+
+<ResponseField name="fps" type="int">
+  Frames per second of the dataset
+</ResponseField>
+
+### summary
+
+Return aggregate statistics about the dataset.
+
+```python
+dataset.summary() -> dict[str, Any]
+```
+
+<ResponseField name="return" type="dict[str, Any]">
+  Dictionary containing repo_id, num_episodes, num_frames, fps, and features
+</ResponseField>
+
+### validate
+
+Run quality checks on the dataset.
+
+```python
+dataset.validate(thresholds: Any = None) -> dict[str, Any]
+```
+
+<ParamField path="thresholds" type="Any" default="None">
+  Quality check thresholds
+</ParamField>
+
+<ResponseField name="return" type="dict[str, Any]">
+  Validation results including passed status and statistics
+</ResponseField>
+
+## Recorder
+
+Real-time frame recorder that writes directly to a LeRobot Dataset. Thread-safe, designed to be called from a teleop control loop.
+
+### create
+
+Create a recorder with a new dataset.
+
+```python
+Recorder.create(
+    repo_id: str,
+    *,
+    root: str | Path = "datasets",
+    fps: int = 30,
+    robot_type: str = "so101",
+    state_dim: int = 6,
+    camera_names: Sequence[str] = (),
+    camera_shape: tuple[int, int, int] = (480, 640, 3),
+    use_videos: bool = True,
+    mcap: bool = False,
+) -> Recorder
+```
+
+<ParamField path="repo_id" type="str" required>
+  Repository ID for the dataset
+</ParamField>
+
+<ParamField path="root" type="str | Path" default="datasets">
+  Root directory to store the dataset
+</ParamField>
+
+<ParamField path="fps" type="int" default="30">
+  Frames per second
+</ParamField>
+
+<ParamField path="robot_type" type="str" default="so101">
+  Robot type identifier
+</ParamField>
+
+<ParamField path="state_dim" type="int" default="6">
+  Dimensionality of the state vector
+</ParamField>
+
+<ParamField path="camera_names" type="Sequence[str]" default="()">
+  Names of cameras to record
+</ParamField>
+
+<ParamField path="camera_shape" type="tuple[int, int, int]" default="(480, 640, 3)">
+  Shape of camera images
+</ParamField>
+
+<ParamField path="use_videos" type="bool" default="True">
+  Whether to encode images as videos
+</ParamField>
+
+<ParamField path="mcap" type="bool" default="False">
+  Whether to also write MCAP sidecar files
+</ParamField>
+
+### start_episode
+
+Begin a new episode.
+
+```python
+recorder.start_episode(*, task: str = "default") -> None
+```
+
+<ParamField path="task" type="str" default="default">
+  Task label for the episode
+</ParamField>
+
+### add_frame
+
+Add a single frame to the active episode. Thread-safe, called from the teleop control loop.
+
+```python
+recorder.add_frame(
+    *,
+    state: np.ndarray,
+    action: np.ndarray | None = None,
+    images: dict[str, np.ndarray] | None = None,
+) -> None
+```
+
+<ParamField path="state" type="np.ndarray" required>
+  Robot state vector
+</ParamField>
+
+<ParamField path="action" type="np.ndarray | None" default="None">
+  Action vector. If None, copies the state vector.
+</ParamField>
+
+<ParamField path="images" type="dict[str, np.ndarray] | None" default="None">
+  Dictionary mapping camera names to image arrays
+</ParamField>
+
+### save_episode
+
+Finalize the current episode.
+
+```python
+recorder.save_episode() -> int
+```
+
+<ResponseField name="return" type="int">
+  Number of frames in the saved episode
+</ResponseField>
+
+### push
+
+Push the dataset to HuggingFace Hub.
+
+```python
+recorder.push(repo_id: str | None = None) -> None
+```
+
+### Properties
+
+<ResponseField name="dataset" type="Dataset">
+  The underlying dataset being recorded to
+</ResponseField>
+
+<ResponseField name="is_recording" type="bool">
+  Whether an episode is currently being recorded
+</ResponseField>
+
+### Example
+
+```python
+from rfx.collection import Recorder
+import numpy as np
+
+recorder = Recorder.create(
+    "my-org/demos",
+    robot_type="so101",
+    state_dim=6
+)
+
+recorder.start_episode(task="pick-place")
+
+for _ in range(100):
+    state = np.random.rand(6)
+    recorder.add_frame(state=state)
+
+recorder.save_episode()
+recorder.push()
+```

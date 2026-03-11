@@ -1,0 +1,372 @@
+---
+title: "rfx.envs"
+description: "Gym-like environment wrappers for robot control"
+---
+
+# rfx.envs
+
+Provides unified interfaces for simulation and real robot control, following the standard Gym API.
+
+```python
+from rfx.envs import Go2Env
+
+env = Go2Env(sim=True)
+obs = env.reset()
+for _ in range(1000):
+    action = env.action_space.sample()
+    obs, reward, done, info = env.step(action)
+    if done:
+        obs = env.reset()
+```
+
+## Box
+
+A box in R^n, representing continuous observation/action spaces.
+
+```python
+from rfx.envs import Box
+import numpy as np
+
+space = Box(low=-1.0, high=1.0, shape=(12,))
+action = space.sample()
+```
+
+### Constructor
+
+```python
+Box(
+    low: np.ndarray,
+    high: np.ndarray,
+    shape: tuple[int, ...],
+    dtype: np.dtype = np.float32
+)
+```
+
+<ParamField path="low" type="np.ndarray" required>
+  Lower bounds for each dimension.
+</ParamField>
+
+<ParamField path="high" type="np.ndarray" required>
+  Upper bounds for each dimension.
+</ParamField>
+
+<ParamField path="shape" type="tuple[int, ...]" required>
+  Shape of the space.
+</ParamField>
+
+<ParamField path="dtype" type="np.dtype" default="np.float32">
+  Data type of the space.
+</ParamField>
+
+### Methods
+
+#### sample
+
+```python
+space.sample() -> np.ndarray
+```
+
+Sample a random point from the space.
+
+<ResponseField name="return" type="np.ndarray">
+  Random sample within bounds.
+</ResponseField>
+
+#### contains
+
+```python
+space.contains(x: np.ndarray) -> bool
+```
+
+Check if x is a valid member of the space.
+
+<ParamField path="x" type="np.ndarray" required>
+  Value to check.
+</ParamField>
+
+<ResponseField name="return" type="bool">
+  True if x is within bounds and has correct shape.
+</ResponseField>
+
+#### clip
+
+```python
+space.clip(x: np.ndarray) -> np.ndarray
+```
+
+Clip x to be within bounds.
+
+<ParamField path="x" type="np.ndarray" required>
+  Value to clip.
+</ParamField>
+
+<ResponseField name="return" type="np.ndarray">
+  Clipped value within bounds.
+</ResponseField>
+
+---
+
+## BaseEnv
+
+Abstract base class for robot environments. All environments should implement this interface for compatibility with training utilities.
+
+### Properties
+
+<ResponseField name="observation_space" type="Box">
+  The observation space.
+</ResponseField>
+
+<ResponseField name="action_space" type="Box">
+  The action space.
+</ResponseField>
+
+### Methods
+
+#### reset
+
+```python
+env.reset() -> np.ndarray
+```
+
+Reset the environment and return initial observation.
+
+<ResponseField name="return" type="np.ndarray">
+  Initial observation.
+</ResponseField>
+
+#### step
+
+```python
+env.step(action: np.ndarray) -> tuple[np.ndarray, float, bool, dict]
+```
+
+Take a step in the environment.
+
+<ParamField path="action" type="np.ndarray" required>
+  Action to take.
+</ParamField>
+
+<ResponseField name="return" type="tuple[np.ndarray, float, bool, dict]">
+  Tuple of (observation, reward, done, info).
+</ResponseField>
+
+#### close
+
+```python
+env.close() -> None
+```
+
+Clean up resources.
+
+#### render
+
+```python
+env.render() -> None
+```
+
+Render the environment (optional).
+
+---
+
+## Go2Env
+
+Gym-like interface for the Unitree Go2 quadruped robot. Can run in simulation mode or on real hardware.
+
+### Spaces
+
+**Observation Space (48 dimensions):**
+- Joint positions (12): Current joint angles
+- Joint velocities (12): Current joint velocities
+- Base angular velocity (3): IMU angular velocity
+- Projected gravity (3): Gravity vector in body frame
+- Commands (3): Velocity commands (vx, vy, yaw_rate)
+- Last actions (12): Previous action
+- Clock (3): Phase variables for gait timing
+
+**Action Space (12 dimensions):**
+- Joint position targets, normalized to [-1, 1]
+- Scaled by action_scale to get actual joint deltas
+
+### Constructor
+
+```python
+Go2Env(
+    sim: bool = True,
+    sim_config: Any = None,
+    robot_ip: str | None = None,
+    control_dt: float = 0.02,
+    action_scale: float = 0.5
+)
+```
+
+<ParamField path="sim" type="bool" default="True">
+  If True, use simulation backend; if False, connect to real robot.
+</ParamField>
+
+<ParamField path="sim_config" type="Any" default="None">
+  Configuration for simulation (only used if sim=True).
+</ParamField>
+
+<ParamField path="robot_ip" type="str | None" default="None">
+  IP address of real robot (only used if sim=False).
+</ParamField>
+
+<ParamField path="control_dt" type="float" default="0.02">
+  Control timestep in seconds (default: 0.02s = 50Hz).
+</ParamField>
+
+<ParamField path="action_scale" type="float" default="0.5">
+  Scaling factor for actions.
+</ParamField>
+
+### Methods
+
+#### set_commands
+
+```python
+env.set_commands(
+    vx: float = 0.0,
+    vy: float = 0.0,
+    yaw_rate: float = 0.0
+) -> None
+```
+
+Set velocity commands for the robot.
+
+<ParamField path="vx" type="float" default="0.0">
+  Forward velocity command.
+</ParamField>
+
+<ParamField path="vy" type="float" default="0.0">
+  Lateral velocity command.
+</ParamField>
+
+<ParamField path="yaw_rate" type="float" default="0.0">
+  Yaw rate command.
+</ParamField>
+
+### Class Attributes
+
+<ResponseField name="JOINT_LIMITS_LOW" type="np.ndarray">
+  Lower joint limits for all 12 joints (radians).
+</ResponseField>
+
+<ResponseField name="JOINT_LIMITS_HIGH" type="np.ndarray">
+  Upper joint limits for all 12 joints (radians).
+</ResponseField>
+
+<ResponseField name="DEFAULT_STANDING" type="np.ndarray">
+  Default standing pose joint positions.
+</ResponseField>
+
+---
+
+## VecEnv
+
+Vectorized environment for parallel rollouts. Runs multiple environments in parallel for faster data collection.
+
+```python
+from rfx.envs import VecEnv, Go2Env
+
+vec_env = VecEnv(lambda: Go2Env(sim=True), num_envs=8)
+obs = vec_env.reset()  # (8, 48)
+actions = vec_env.action_space.sample()  # (8, 12)
+obs, rewards, dones, infos = vec_env.step(actions)
+```
+
+### Constructor
+
+```python
+VecEnv(
+    env_fn: callable,
+    num_envs: int
+)
+```
+
+<ParamField path="env_fn" type="callable" required>
+  Function that creates a single environment.
+</ParamField>
+
+<ParamField path="num_envs" type="int" required>
+  Number of parallel environments.
+</ParamField>
+
+### Methods
+
+#### reset
+
+```python
+vec_env.reset() -> np.ndarray
+```
+
+Reset all environments.
+
+<ResponseField name="return" type="np.ndarray">
+  Stacked observations of shape `(num_envs, obs_dim)`.
+</ResponseField>
+
+#### step
+
+```python
+vec_env.step(actions: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, list]
+```
+
+Step all environments. Automatically resets environments when they are done.
+
+<ParamField path="actions" type="np.ndarray" required>
+  Actions for all environments, shape `(num_envs, action_dim)`.
+</ParamField>
+
+<ResponseField name="return" type="tuple[np.ndarray, np.ndarray, np.ndarray, list]">
+  Tuple of (observations, rewards, dones, infos).
+</ResponseField>
+
+#### close
+
+```python
+vec_env.close() -> None
+```
+
+Close all environments.
+
+---
+
+## make_vec_env
+
+Utility function to create a (vectorized) environment.
+
+```python
+from rfx.envs import make_vec_env, Go2Env
+
+# Single environment
+env = make_vec_env(Go2Env, num_envs=1, sim=True)
+
+# Vectorized environment
+vec_env = make_vec_env(Go2Env, num_envs=8, sim=True)
+```
+
+### Function Signature
+
+```python
+make_vec_env(
+    env_class: type = Go2Env,
+    num_envs: int = 1,
+    **kwargs
+) -> VecEnv | BaseEnv
+```
+
+<ParamField path="env_class" type="type" default="Go2Env">
+  Environment class to instantiate.
+</ParamField>
+
+<ParamField path="num_envs" type="int" default="1">
+  Number of parallel environments.
+</ParamField>
+
+<ParamField path="**kwargs" type="dict">
+  Arguments passed to environment constructor.
+</ParamField>
+
+<ResponseField name="return" type="VecEnv | BaseEnv">
+  VecEnv if num_envs > 1, otherwise single environment.
+</ResponseField>

@@ -1,122 +1,139 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "rfx",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#4595db",
+    "light": "#5ebf9e",
+    "dark": "#0494dc"
   },
-  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "https://media.brand.dev/277d2da5-701e-40c3-ae2b-d016d87186f7.svg",
+    "dark": "https://media.brand.dev/58ac76ea-3127-43fe-90dd-bda346992855.png"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/quantbagel/rfx"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/quantbagel/rfx",
+      "discord": "https://discord.gg/xV8bAGM8WT"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "installation"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/robot-interface",
+              "concepts/policies",
+              "concepts/observations",
+              "concepts/control-loop"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "CLI Reference",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "cli/overview",
+              "cli/record",
+              "cli/deploy",
+              "cli/doctor"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Hardware",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "hardware/overview",
+              "hardware/so101",
+              "hardware/go2",
+              "hardware/custom-robots"
+            ]
+          },
+          {
+            "group": "Simulation",
+            "pages": [
+              "simulation/overview",
+              "simulation/backends",
+              "simulation/mock-robot"
+            ]
+          },
+          {
+            "group": "Workflows",
+            "pages": [
+              "workflows/collect-demos",
+              "workflows/train-policy",
+              "workflows/deploy-policy",
+              "workflows/hub-integration"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/custom-drivers",
+              "advanced/skills-system",
+              "advanced/rfxjit",
+              "advanced/rust-core"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Core",
             "pages": [
-              "api-reference/introduction"
+              "api/robot",
+              "api/session",
+              "api/deploy"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Data Collection",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/collection",
+              "api/teleop"
+            ]
+          },
+          {
+            "group": "Models & Policies",
+            "pages": [
+              "api/hub",
+              "api/nn",
+              "api/decorators"
+            ]
+          },
+          {
+            "group": "Simulation",
+            "pages": [
+              "api/sim",
+              "api/envs"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "api/utils",
+              "api/transforms",
+              "api/drivers"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

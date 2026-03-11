@@ -1,0 +1,472 @@
+---
+title: Skills System
+description: Expose Python functions to LLM agents with the @skill decorator
+---
+
+## Overview
+
+The rfx skills system enables natural language control of robots by exposing Python functions to LLM agents. Skills are automatically converted to tool schemas (OpenAI/Anthropic format) for agent consumption.
+
+Inspired by [DimensionalOS](https://github.com/dimensionOS/dimension-os)'s skill-based architecture, the system uses decorators and docstring parsing to create agent-callable capabilities.
+
+## Quick Start
+
+```python
+import rfx
+import time
+
+# Connect to robot
+go2 = rfx.Go2.connect()
+
+@rfx.skill
+def walk_forward(distance: float = 1.0):
+    '''Walk forward by the specified distance in meters'''
+    go2.walk(0.3, 0, 0)
+    time.sleep(distance / 0.3)
+    go2.stand()
+
+@rfx.skill(name="look_around", tags=["perception"])
+def survey():
+    '''Rotate in place to survey surroundings'''
+    go2.walk(0, 0, 0.5)
+    time.sleep(2.0)
+    go2.stand()
+
+# Skills are ready for LLM agents
+```
+
+## The @skill Decorator
+
+The `@skill` decorator transforms functions into executable skills with automatic parameter extraction:
+
+```python
+def skill[
+    F: Callable[..., Any]
+](
+    func: F | None = None,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    tags: list[str] | None = None,
+) -> Skill | Callable[[F], Skill]:
+```
+
+<ParamField path="func" type="Callable">
+  The function to decorate (when used without arguments)
+</ParamField>
+
+<ParamField path="name" type="str" optional>
+  Custom name for the skill (defaults to function name)
+</ParamField>
+
+<ParamField path="description" type="str" optional>
+  Custom description (defaults to docstring)
+</ParamField>
+
+<ParamField path="tags" type="list[str]" optional>
+  Tags for categorization (e.g., `["locomotion", "vision"]`)
+</ParamField>
+
+### Decorator Syntax
+
+<CodeGroup>
+```python Simple Decorator
+@rfx.skill
+def stand_up():
+    '''Make the robot stand from a sitting position'''
+    go2.stand()
+```
+
+```python With Parameters
+@rfx.skill(name="emergency_stop", tags=["safety"])
+def stop():
+    '''Immediately stop all robot motion'''
+    go2.walk(0, 0, 0)
+```
+
+```python With Type Hints
+@rfx.skill
+def set_motor_position(motor_index: int, position: float, kp: float = 20.0, kd: float = 0.5):
+    '''Set a single motor to target position with PD gains
+    
+    Args:
+        motor_index: Motor index (0-11)
+        position: Target position in radians
+        kp: Proportional gain
+        kd: Derivative gain
+    '''
+    go2.set_motor_position(motor_index, position, kp, kd)
+```
+</CodeGroup>
+
+## Skill Registry
+
+The `SkillRegistry` manages collections of skills for LLM agent integration:
+
+```python
+from rfx.skills import SkillRegistry
+
+# Create a registry
+registry = SkillRegistry()
+
+# Register skills
+registry.register(walk_forward)
+registry.register(survey)
+
+# Or register a raw function
+def wave():
+    '''Wave the front leg'''
+    go2.set_motor_position(3, 0.5, 20.0, 0.5)  # FL_HIP
+
+registry.register(wave, tags=["gesture"])
+
+# List all skills
+print(registry.describe())
+# Output:
+# Available skills:
+#   - walk_forward: Walk forward by the specified distance in meters
+#       Parameters: distance: number
+#   - look_around: Rotate in place to survey surroundings
+#   - wave: Wave the front leg
+```
+
+### Registry API
+
+The registry provides methods for managing and querying skills:
+
+```python
+class SkillRegistry:
+    def register(self, skill_or_func: Skill | Callable, **kwargs) -> Skill:
+        """Register a skill or function."""
+
+    def unregister(self, name: str) -> Skill | None:
+        """Remove a skill from the registry."""
+
+    def get(self, name: str) -> Skill | None:
+        """Get a skill by name."""
+
+    def execute(self, name: str, **kwargs: Any) -> Any:
+        """Execute a skill by name with arguments."""
+
+    def filter_by_tag(self, tag: str) -> list[Skill]:
+        """Get skills with a specific tag."""
+
+    def to_tools(self) -> list[dict[str, Any]]:
+        """Convert all skills to OpenAI tool format."""
+
+    def to_anthropic_tools(self) -> list[dict[str, Any]]:
+        """Convert all skills to Anthropic tool format."""
+```
+
+## LLM Integration
+
+Convert skills to tool schemas for LLM agents:
+
+### OpenAI Format
+
+```python
+import openai
+from rfx.skills import SkillRegistry
+
+registry = SkillRegistry()
+registry.register(walk_forward)
+registry.register(survey)
+
+# Convert to OpenAI tools
+tools = registry.to_tools()
+
+client = openai.OpenAI()
+response = client.chat.completions.create(
+    model="gpt-4",
+    messages=[
+        {"role": "system", "content": "You control a quadruped robot."},
+        {"role": "user", "content": "Walk forward 2 meters"}
+    ],
+    tools=tools
+)
+
+# Execute tool calls
+for tool_call in response.choices[0].message.tool_calls:
+    result = registry.execute(
+        tool_call.function.name,
+        **json.loads(tool_call.function.arguments)
+    )
+```
+
+### Anthropic Format
+
+```python
+import anthropic
+
+tools = registry.to_anthropic_tools()
+
+client = anthropic.Anthropic()
+response = client.messages.create(
+    model="claude-3-5-sonnet-20241022",
+    max_tokens=1024,
+    tools=tools,
+    messages=[
+        {"role": "user", "content": "Survey the environment"}
+    ]
+)
+
+# Execute tool calls
+for content_block in response.content:
+    if content_block.type == "tool_use":
+        result = registry.execute(
+            content_block.name,
+            **content_block.input
+        )
+```
+
+## Docstring Parsing
+
+The skills system parses docstrings to extract descriptions and parameter documentation. Both Google-style and NumPy-style docstrings are supported:
+
+<CodeGroup>
+```python Google-style
+@rfx.skill
+def move_joint(joint_id: int, angle: float, speed: float = 1.0):
+    '''Move a single joint to target angle.
+
+    This function commands a joint to move to the specified angle
+    at the given speed.
+
+    Args:
+        joint_id: Joint identifier (0-11)
+        angle: Target angle in radians
+        speed: Movement speed multiplier
+
+    Returns:
+        True if command was successful
+    '''
+    # Implementation
+    return True
+```
+
+```python NumPy-style
+@rfx.skill
+def move_joint(joint_id: int, angle: float, speed: float = 1.0):
+    '''
+    Move a single joint to target angle.
+
+    This function commands a joint to move to the specified angle
+    at the given speed.
+
+    Parameters
+    ----------
+    joint_id : int
+        Joint identifier (0-11)
+    angle : float
+        Target angle in radians
+    speed : float
+        Movement speed multiplier
+
+    Returns
+    -------
+    bool
+        True if command was successful
+    '''
+    # Implementation
+    return True
+```
+</CodeGroup>
+
+<Info>
+Parameter descriptions are automatically included in tool schemas. Write clear docstrings to help LLMs understand skill capabilities.
+</Info>
+
+## Context-Scoped Registries
+
+For testing or async code, use context-scoped registries:
+
+```python
+from rfx.skills import skill_registry_context
+
+async def test_skills():
+    with skill_registry_context() as registry:
+        @skill
+        def test_skill():
+            '''Test skill'''
+            pass
+        
+        registry.register(test_skill)
+        # Registry is isolated to this context
+        assert "test_skill" in registry
+    # Registry is cleaned up after context exits
+```
+
+<Warning>
+The global registry `get_global_registry()` is deprecated. Use `skill_registry_context()` for new code or `get_current_registry()` for backward compatibility.
+</Warning>
+
+## Type Conversion
+
+Type hints are automatically converted to JSON schema types:
+
+| Python Type | JSON Type |
+|-------------|----------|
+| `str` | `"string"` |
+| `int` | `"integer"` |
+| `float` | `"number"` |
+| `bool` | `"boolean"` |
+| `list` | `"array"` |
+| `dict` | `"object"` |
+| `None` / `NoneType` | `"null"` |
+
+Implementation in `rfx/python/rfx/skills.py:322-341`:
+
+```python
+def _python_type_to_json_type(hint: Any) -> str:
+    """Convert Python type hint to JSON schema type."""
+    origin = getattr(hint, "__origin__", None)
+
+    if hint is str:
+        return "string"
+    elif hint is int:
+        return "integer"
+    elif hint is float:
+        return "number"
+    elif hint is bool:
+        return "boolean"
+    elif hint is list or origin is list:
+        return "array"
+    elif hint is dict or origin is dict:
+        return "object"
+    elif hint is None or hint is type(None):
+        return "null"
+    else:
+        return "string"
+```
+
+## Advanced Example: Multi-Modal Skills
+
+```python
+import rfx
+import numpy as np
+from typing import Optional
+
+# Initialize robot and skill registry
+go2 = rfx.Go2.connect()
+registry = rfx.SkillRegistry()
+
+@rfx.skill(tags=["locomotion", "navigation"])
+def walk_to_waypoint(x: float, y: float, max_speed: float = 0.5):
+    '''Navigate to a waypoint using visual odometry.
+    
+    Args:
+        x: Target X coordinate in meters
+        y: Target Y coordinate in meters
+        max_speed: Maximum velocity in m/s
+    '''
+    # Simple proportional controller
+    state = go2.state()
+    current_x, current_y = state.position[0], state.position[1]
+    
+    while np.hypot(x - current_x, y - current_y) > 0.1:
+        dx = x - current_x
+        dy = y - current_y
+        
+        vx = np.clip(dx * 0.5, -max_speed, max_speed)
+        vy = np.clip(dy * 0.5, -max_speed, max_speed)
+        
+        go2.walk(vx, vy, 0)
+        time.sleep(0.1)
+        
+        state = go2.state()
+        current_x, current_y = state.position[0], state.position[1]
+    
+    go2.stand()
+
+@rfx.skill(tags=["perception"])
+def scan_environment() -> dict:
+    '''Perform a 360-degree scan and return detected objects.
+    
+    Returns:
+        Dictionary with detected objects and their positions
+    '''
+    detections = []
+    for angle in np.linspace(0, 2*np.pi, 8):
+        # Rotate to angle
+        go2.walk(0, 0, 0.3)
+        time.sleep(angle / 0.3)
+        go2.stand()
+        
+        # Capture and process sensor data
+        state = go2.state()
+        # Placeholder: integrate vision model here
+        detections.append({
+            "angle": angle,
+            "objects": []  # Vision processing results
+        })
+    
+    return {"detections": detections}
+
+# Register all skills
+registry.register(walk_to_waypoint)
+registry.register(scan_environment)
+
+# Export for LLM agent
+tools = registry.to_tools()
+print(f"Registered {len(tools)} skills for agent")
+```
+
+## Implementation Details
+
+The Skill dataclass (from `rfx/python/rfx/skills.py:225-267`):
+
+```python
+@dataclass
+class Skill:
+    """A skill that can be executed by an LLM agent."""
+
+    name: str
+    description: str
+    func: Callable[..., Any]
+    parameters: dict[str, dict[str, Any]] = field(default_factory=dict)
+    required: list[str] = field(default_factory=list)
+    returns: str | None = None
+    tags: list[str] = field(default_factory=list)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        """Execute the skill."""
+        return self.func(*args, **kwargs)
+
+    def to_tool(self) -> dict[str, Any]:
+        """Convert to OpenAI/Anthropic tool format."""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": self.parameters,
+                    "required": self.required,
+                },
+            },
+        }
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Write Clear Docstrings" icon="book">
+    LLMs use docstrings to understand skill capabilities. Be specific about parameters and side effects.
+  </Card>
+  <Card title="Use Type Hints" icon="code">
+    Type hints improve tool schema accuracy and enable better IDE support.
+  </Card>
+  <Card title="Tag Your Skills" icon="tag">
+    Use tags to organize skills by category (locomotion, perception, manipulation, etc.).
+  </Card>
+  <Card title="Keep Skills Atomic" icon="cube">
+    Each skill should do one thing well. Compose complex behaviors in the agent layer.
+  </Card>
+</CardGroup>
+
+## See Also
+
+- [Custom Drivers](/advanced/custom-drivers) - Build robot drivers that expose skills
+- [Control Loops](/core-concepts/control) - Integrate skills with real-time control
+- [API Reference: Skills](/api-reference/skills) - Complete API documentation

@@ -1,0 +1,448 @@
+---
+title: Deploy Policies
+description: Run trained policies on real hardware
+---
+
+The missing piece: load a model, connect to hardware, run inference. rfx's deploy command handles everything from weight loading to real-time control loops.
+
+## Quick Start
+
+<CodeGroup>
+
+```bash From Checkpoint
+rfx deploy runs/my-policy --robot so101
+```
+
+```bash From Hub
+rfx deploy hf://rfx-community/go2-walk-v1 --robot go2
+```
+
+```bash From Python File
+rfx deploy my_policy.py --robot so101
+```
+
+```bash Mock Hardware
+rfx deploy runs/my-policy --robot so101 --mock
+```
+
+</CodeGroup>
+
+## Deployment Sources
+
+rfx supports three ways to load policies:
+
+### 1. Saved Checkpoints
+
+Load from a local directory containing `rfx_config.json` and weights:
+
+```bash
+rfx deploy runs/so101-pick-v1 --robot so101
+```
+
+```python
+import rfx
+
+stats = rfx.deploy("runs/so101-pick-v1", robot="so101")
+print(f"Ran {stats.iterations} steps with {stats.overruns} overruns")
+```
+
+### 2. HuggingFace Hub
+
+Load directly from Hub using the `hf://` prefix:
+
+```bash
+rfx deploy hf://rfx-community/go2-walk-v1 --robot go2 --duration 60
+```
+
+```python
+import rfx
+
+stats = rfx.deploy(
+    "hf://rfx-community/go2-walk-v1",
+    robot="go2",
+    duration=60.0,
+)
+```
+
+The model is downloaded and cached locally using HuggingFace's `snapshot_download`.
+
+### 3. Python Functions
+
+Deploy a policy function directly from a `.py` file:
+
+```python
+# my_policy.py
+import torch
+import rfx
+
+@rfx.policy
+def hold_position(obs):
+    """Hold the robot still."""
+    return torch.zeros(1, 64)
+```
+
+```bash
+rfx deploy my_policy.py --robot so101
+```
+
+This is perfect for testing hand-written policies or debugging before full training.
+
+## Python API
+
+The `rfx.deploy()` function provides full programmatic control:
+
+```python
+import rfx
+
+stats = rfx.deploy(
+    policy_source="runs/my-policy",    # or "hf://...", "policy.py"
+    robot="so101",                      # Robot type
+    config=None,                        # Optional robot YAML config
+    port="/dev/ttyACM0",                # Serial port or IP override
+    rate_hz=50.0,                       # Control loop frequency
+    duration=None,                      # Run time (None = infinite)
+    mock=False,                         # Use MockRobot instead of real hardware
+    device="cpu",                       # Torch device for inference
+    warmup_s=0.5,                       # Warmup time after reset
+    verbose=True,                       # Print status and stats
+)
+
+print(f"Average period: {stats.avg_period_s * 1000:.2f} ms")
+print(f"P99 jitter: {stats.p99_jitter_s * 1000:.2f} ms")
+```
+
+## Robot Configuration
+
+rfx resolves the robot configuration automatically:
+
+<Steps>
+  <Step title="Bundled config (recommended)">
+    If the policy was saved with `robot_config=...`, it's loaded automatically:
+    ```bash
+    rfx deploy runs/my-policy  # No --robot needed!
+    ```
+  </Step>
+
+  <Step title="Built-in configs">
+    Use `--robot` with a known type:
+    ```bash
+    rfx deploy runs/my-policy --robot so101  # or go2, g1, innate
+    ```
+  </Step>
+
+  <Step title="Custom YAML config">
+    Pass a YAML config file:
+    ```bash
+    rfx deploy runs/my-policy --config my_robot.yaml
+    ```
+  </Step>
+</Steps>
+
+### Built-in Robot Types
+
+| Robot Type | Description | Interface |
+|------------|-------------|----------|
+| `so101` | SO-101 6-DOF arm | USB serial |
+| `go2` | Unitree Go2 quadruped | Ethernet (Zenoh) |
+| `g1` | Unitree G1 humanoid | Ethernet (Zenoh) |
+| `innate` | Innate robot | Custom |
+
+```python
+# Use built-in config
+from rfx.config import SO101_CONFIG, GO2_CONFIG, G1_CONFIG
+
+stats = rfx.deploy(
+    "runs/my-policy",
+    robot="so101",  # Automatically uses SO101_CONFIG
+)
+```
+
+## Deployment Options
+
+### Control Loop Frequency
+
+Set the control rate in Hz:
+
+```bash
+rfx deploy runs/my-policy --robot so101 --rate-hz 100
+```
+
+```python
+stats = rfx.deploy(
+    "runs/my-policy",
+    robot="so101",
+    rate_hz=100.0,  # 100 Hz control loop
+)
+```
+
+If not specified, uses the robot config's `control_freq_hz`.
+
+### Timed Runs
+
+Run for a specific duration:
+
+```bash
+# Run for 30 seconds
+rfx deploy runs/my-policy --robot so101 --duration 30
+```
+
+```python
+stats = rfx.deploy(
+    "runs/my-policy",
+    robot="so101",
+    duration=30.0,  # Stop after 30 seconds
+)
+```
+
+Without `--duration`, the policy runs until you press **Ctrl+C**.
+
+### Hardware Overrides
+
+Override the robot's port or IP address:
+
+```bash
+# Serial port override
+rfx deploy runs/my-policy --robot so101 --port /dev/ttyACM1
+
+# IP address override (Go2/G1)
+rfx deploy runs/my-policy --robot go2 --port 192.168.123.161
+```
+
+```python
+stats = rfx.deploy(
+    "runs/my-policy",
+    robot="go2",
+    port="192.168.123.161",  # Custom IP
+)
+```
+
+### Mock Deployment
+
+Test without hardware using `MockRobot`:
+
+```bash
+rfx deploy runs/my-policy --robot so101 --mock
+```
+
+```python
+stats = rfx.deploy(
+    "runs/my-policy",
+    robot="so101",
+    mock=True,  # Use MockRobot (zero-latency, no hardware)
+)
+```
+
+Mock mode is perfect for:
+- Testing policy loading
+- Verifying control loop timing
+- CI/CD pipelines
+- Development without hardware access
+
+## Loading Policies
+
+Use the lower-level `rfx.load_policy()` API for inspection or custom deployment:
+
+```python
+import rfx
+
+# Load from checkpoint
+loaded = rfx.load_policy("runs/so101-pick-v1")
+
+# Load from Hub
+loaded = rfx.load_policy("hf://rfx-community/go2-walk-v1")
+
+# Inspect without running
+print(f"Policy type: {loaded.policy_type}")
+print(f"Robot config: {loaded.robot_config.name}")
+print(f"Training steps: {loaded.training_info.get('total_steps')}")
+
+# Use directly
+obs = robot.observe()
+action = loaded(obs)  # LoadedPolicy is callable
+robot.act(action)
+```
+
+### Policy Inspection
+
+Quickly inspect a saved policy without loading weights:
+
+```python
+import rfx
+
+config = rfx.inspect_policy("runs/so101-pick-v1")
+print(config)
+# {
+#   "policy_type": "mlp",
+#   "robot_config": {...},
+#   "training": {"total_steps": 50000},
+#   "architecture": {...}
+# }
+```
+
+## Self-Describing Models
+
+Every rfx policy is a self-describing directory:
+
+```
+runs/go2-walk-v1/
+├── rfx_config.json       # Architecture + robot + training metadata
+├── model.safetensors     # Weights in SafeTensors format
+└── normalizer.json       # Observation normalizer (optional)
+```
+
+This enables **zero-config deployment**:
+
+```bash
+# No --robot needed - config is bundled
+rfx deploy runs/go2-walk-v1
+```
+
+## Deployment Statistics
+
+After deployment, inspect timing and performance:
+
+```python
+import rfx
+
+stats = rfx.deploy("runs/my-policy", robot="so101", duration=30.0)
+
+print(f"Total steps: {stats.iterations}")
+print(f"Overruns: {stats.overruns}")  # Missed deadlines
+print(f"Avg period: {stats.avg_period_s * 1000:.2f} ms")
+print(f"Target period: {stats.target_period_s * 1000:.2f} ms")
+print(f"P50 jitter: {stats.p50_jitter_s * 1000:.2f} ms")
+print(f"P95 jitter: {stats.p95_jitter_s * 1000:.2f} ms")
+print(f"P99 jitter: {stats.p99_jitter_s * 1000:.2f} ms")
+```
+
+Example output:
+
+```
+[rfx] Done - 1500 steps, 3 overruns
+[rfx]   avg period:  20.14 ms  (target: 20.00 ms)
+[rfx]   jitter p50:  0.08 ms
+[rfx]   jitter p95:  0.42 ms
+[rfx]   jitter p99:  1.23 ms
+```
+
+## Custom Deployment Loops
+
+For advanced use cases, build your own deployment loop:
+
+```python
+import rfx
+import time
+
+# Load policy and create robot
+loaded = rfx.load_policy("runs/my-policy")
+robot = rfx.RealRobot(loaded.robot_config)
+
+robot.reset()
+time.sleep(0.5)  # Warmup
+
+target_period = 1.0 / 50.0  # 50 Hz
+
+try:
+    for step in range(1000):
+        start = time.perf_counter()
+        
+        obs = robot.observe()
+        action = loaded(obs)
+        robot.act(action)
+        
+        # Rate limiting
+        elapsed = time.perf_counter() - start
+        if elapsed < target_period:
+            time.sleep(target_period - elapsed)
+        
+        if step % 50 == 0:
+            print(f"Step {step}, elapsed {elapsed*1000:.2f} ms")
+except KeyboardInterrupt:
+    pass
+finally:
+    robot.disconnect()
+```
+
+## Graceful Shutdown
+
+The deploy command handles **Ctrl+C** gracefully:
+
+- First **Ctrl+C**: Stops the control loop cleanly
+- Second **Ctrl+C**: Force exits immediately
+
+```python
+import signal
+import rfx
+
+def safe_deploy(policy_source, robot_type):
+    interrupted = False
+    
+    def handler(signum, frame):
+        nonlocal interrupted
+        if interrupted:
+            sys.exit(1)
+        interrupted = True
+        print("\n[rfx] Stopping...")
+    
+    signal.signal(signal.SIGINT, handler)
+    
+    stats = rfx.deploy(
+        policy_source,
+        robot=robot_type,
+        verbose=True,
+    )
+    
+    return stats
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Test in Mock Mode First">
+    Always verify deployment works with `--mock` before connecting to real hardware.
+  </Accordion>
+
+  <Accordion title="Monitor Jitter">
+    Check P99 jitter after deployment. High jitter (>10ms for 50Hz) indicates the policy is too slow or the system is overloaded.
+  </Accordion>
+
+  <Accordion title="Use Warmup Time">
+    The default 0.5s warmup allows the robot to stabilize after reset. Increase for heavier robots.
+  </Accordion>
+
+  <Accordion title="Start Slow">
+    Begin with short durations (10-30s) to verify behavior before long runs.
+  </Accordion>
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Cannot determine robot type">
+    Either pass `--robot`, `--config`, or ensure the policy was saved with `robot_config=...`.
+  </Accordion>
+
+  <Accordion title="High jitter / overruns">
+    - Reduce `--rate-hz`
+    - Use a faster device (`--device cuda`)
+    - Simplify the policy architecture
+    - Check system load (close other applications)
+  </Accordion>
+
+  <Accordion title="Connection failed">
+    - Verify hardware is powered and connected
+    - Check `--port` matches actual device
+    - For Go2/G1, verify network connectivity with `ping <robot-ip>`
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Hub Integration" icon="cloud" href="/workflows/hub-integration">
+    Push your policies to HuggingFace Hub for easy sharing
+  </Card>
+  <Card title="Collect Demos" icon="video" href="/workflows/collect-demos">
+    Record more demonstrations to improve your policy
+  </Card>
+</CardGroup>

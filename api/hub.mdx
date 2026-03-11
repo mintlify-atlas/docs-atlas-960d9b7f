@@ -1,0 +1,125 @@
+---
+title: "rfx.hub"
+description: "Load, push, and inspect self-describing policy models"
+---
+
+The `rfx.hub` module provides the main entry points for working with saved policies. It supports both local paths and HuggingFace Hub models.
+
+## Functions
+
+### load_policy
+
+Load a self-describing policy from a local path or HuggingFace Hub.
+
+```python
+loaded = rfx.load_policy("runs/go2-walk-v1")
+loaded = rfx.load_policy("hf://rfx-community/go2-walk-v1")
+```
+
+<ParamField path="source" type="str | Path">
+  Local directory path, or `"hf://org/repo"` for Hub models.
+</ParamField>
+
+**Returns:** `LoadedPolicy` with `.policy`, `.robot_config`, `.normalizer`, `.config`
+
+---
+
+### push_policy
+
+Push a saved policy directory to HuggingFace Hub.
+
+```python
+url = rfx.push_policy("runs/go2-walk-v1", "rfx-community/go2-walk-v1")
+print(url)  # https://huggingface.co/rfx-community/go2-walk-v1
+```
+
+<ParamField path="path" type="str | Path" required>
+  Local directory containing the saved policy.
+</ParamField>
+
+<ParamField path="repo_id" type="str" required>
+  HuggingFace repo ID (e.g. `"rfx-community/go2-walk-v1"`).
+</ParamField>
+
+<ParamField path="private" type="bool" default="False">
+  Whether to create a private repo.
+</ParamField>
+
+**Returns:** `str` - The URL of the uploaded model.
+
+---
+
+### inspect_policy
+
+Read `rfx_config.json` without loading weights. Useful for quick inspection.
+
+```python
+config = rfx.inspect_policy("runs/go2-walk-v1")
+print(config["policy_type"])  # "MLP"
+print(config["rfx_version"])  # "0.1.0"
+```
+
+<ParamField path="source" type="str | Path">
+  Local directory path, or `"hf://org/repo"` for Hub models.
+</ParamField>
+
+**Returns:** `dict[str, Any]` - The parsed `rfx_config.json` dict.
+
+---
+
+## Classes
+
+### LoadedPolicy
+
+A loaded policy with all its metadata. Callable — accepts the obs dict that `robot.observe()` returns and handles torch↔tinygrad conversion automatically.
+
+```python
+loaded = rfx.load_policy("runs/go2-walk-v1")
+
+# Use with rfx.run()
+rfx.run(robot, loaded)
+
+# Or call directly
+obs = robot.observe()
+action = loaded(obs)
+```
+
+#### Attributes
+
+<ResponseField name="policy" type="Policy">
+  The policy network (e.g. MLP, JitPolicy, TorchJitPolicy).
+</ResponseField>
+
+<ResponseField name="robot_config" type="RobotConfig | None">
+  Robot configuration bundled with the policy.
+</ResponseField>
+
+<ResponseField name="normalizer" type="ObservationNormalizer | None">
+  Observation normalizer (mean/std scaling).
+</ResponseField>
+
+<ResponseField name="config" type="dict[str, Any]">
+  Full policy metadata from `rfx_config.json`.
+</ResponseField>
+
+#### Properties
+
+<ResponseField name="policy_type" type="str">
+  Policy class name (e.g. `"MLP"`, `"TorchJitPolicy"`).
+</ResponseField>
+
+<ResponseField name="training_info" type="dict[str, Any]">
+  Training metadata (steps, rewards, etc.).
+</ResponseField>
+
+#### Methods
+
+**`__call__(obs)`**
+
+Run inference on observations.
+
+<ParamField path="obs" type="dict[str, torch.Tensor] | Tensor">
+  Observations from `robot.observe()` or raw tinygrad tensor.
+</ParamField>
+
+**Returns:** `torch.Tensor` - Action tensor.

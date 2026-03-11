@@ -1,0 +1,541 @@
+---
+title: "teleop"
+description: "Python-first teleoperation API for high-rate robot control"
+---
+
+The `rfx.teleop` module provides a high-rate teleoperation runtime for SO-101 robots with async camera streams, data recording, and transport integration.
+
+## run
+
+Run a teleoperation session.
+
+```python
+rfx.teleop.run(
+    arm: ArmPairConfig | Sequence[ArmPairConfig],
+    *,
+    logging: bool = False,
+    rate_hz: float | None = None,
+    duration_s: float | None = None,
+    cameras: Sequence[CameraStreamConfig] | None = None,
+    transport: Any | None = None,
+    data_output: str | Path | None = None,
+    lineage: str | None = None,
+    scale: str | None = None,
+    format: str = "native",
+    metadata: Mapping[str, Any] | None = None,
+    otel: bool = False,
+    otel_exporter: str = "console",
+    otel_sample_every: int = 100,
+    otlp_endpoint: str | None = None,
+) -> RecordedEpisode | dict[str, Any] | None
+```
+
+<ParamField path="arm" type="ArmPairConfig | Sequence[ArmPairConfig]" required>
+  Arm pair configuration(s)
+</ParamField>
+
+<ParamField path="logging" type="bool" default="False">
+  Enable live per-loop movement trace in terminal
+</ParamField>
+
+<ParamField path="rate_hz" type="float | None" default="None">
+  Control loop rate in Hz
+</ParamField>
+
+<ParamField path="duration_s" type="float | None" default="None">
+  Duration to run in seconds. If None, runs until keyboard interrupt.
+</ParamField>
+
+<ParamField path="cameras" type="Sequence[CameraStreamConfig] | None" default="None">
+  Camera configurations for recording
+</ParamField>
+
+<ParamField path="transport" type="Any | None" default="None">
+  Transport configuration for data publishing
+</ParamField>
+
+<ParamField path="data_output" type="str | Path | None" default="None">
+  Directory to record data. If None, recording is disabled.
+</ParamField>
+
+<ParamField path="lineage" type="str | None" default="None">
+  Lineage metadata for the recording
+</ParamField>
+
+<ParamField path="scale" type="str | None" default="None">
+  Scale metadata for the recording
+</ParamField>
+
+<ParamField path="format" type="str" default="native">
+  Export format: "native", "mcap", or "lerobot"
+</ParamField>
+
+<ParamField path="metadata" type="Mapping[str, Any] | None" default="None">
+  Additional metadata for the recording
+</ParamField>
+
+<ParamField path="otel" type="bool" default="False">
+  Enable OpenTelemetry tracing
+</ParamField>
+
+<ParamField path="otel_exporter" type="str" default="console">
+  OpenTelemetry exporter type
+</ParamField>
+
+<ParamField path="otel_sample_every" type="int" default="100">
+  Sample telemetry every N iterations
+</ParamField>
+
+<ParamField path="otlp_endpoint" type="str | None" default="None">
+  OTLP endpoint for telemetry export
+</ParamField>
+
+<ResponseField name="return" type="RecordedEpisode | dict[str, Any] | None">
+  Recorded episode if data_output is set, otherwise None
+</ResponseField>
+
+### Example
+
+```python
+import rfx.teleop
+
+arm = rfx.teleop.so101(
+    leader_port="/dev/ttyACM0",
+    follower_port="/dev/ttyACM1"
+)
+
+rfx.teleop.run(arm, data_output="recordings", duration_s=60.0)
+```
+
+## so101
+
+Beginner-friendly SO-101 arm spec factory.
+
+```python
+rfx.teleop.so101(
+    config: str | Mapping[str, Any] | None = None,
+    **kwargs: Any
+) -> ArmPairConfig
+```
+
+<ParamField path="config" type="str | Mapping[str, Any] | None" default="None">
+  Configuration dictionary or file path
+</ParamField>
+
+<ParamField path="kwargs" type="Any">
+  Additional configuration parameters (name, leader_port, follower_port)
+</ParamField>
+
+<ResponseField name="return" type="ArmPairConfig">
+  Configured arm pair
+</ResponseField>
+
+### Example
+
+```python
+import rfx.teleop
+
+# Auto-discovery
+arm = rfx.teleop.so101()
+
+# Explicit ports
+arm = rfx.teleop.so101(
+    leader_port="/dev/cu.usbmodemA",
+    follower_port="/dev/cu.usbmodemB"
+)
+
+# From dict
+arm = rfx.teleop.so101({
+    "name": "main",
+    "leader_port": "/dev/ttyACM0",
+    "follower_port": "/dev/ttyACM1"
+})
+```
+
+## BimanualSo101Session
+
+Python-first high-rate teleop session with async cameras and recorder integration.
+
+### Constructor
+
+```python
+BimanualSo101Session(
+    config: TeleopSessionConfig,
+    *,
+    recorder: LeRobotRecorder | None = None,
+    collection_recorder: Any | None = None,
+    pair_factory: Callable[[ArmPairConfig], ArmPair] | None = None,
+    transport: TransportLike | None = None,
+)
+```
+
+<ParamField path="config" type="TeleopSessionConfig" required>
+  Session configuration
+</ParamField>
+
+<ParamField path="recorder" type="LeRobotRecorder | None" default="None">
+  Custom recorder instance
+</ParamField>
+
+<ParamField path="collection_recorder" type="Any | None" default="None">
+  Collection recorder for integration with rfx.collection
+</ParamField>
+
+<ParamField path="pair_factory" type="Callable[[ArmPairConfig], ArmPair] | None" default="None">
+  Custom arm pair factory
+</ParamField>
+
+<ParamField path="transport" type="TransportLike | None" default="None">
+  Custom transport instance
+</ParamField>
+
+### from_ports
+
+Create a bimanual session from explicit port specifications.
+
+```python
+BimanualSo101Session.from_ports(
+    *,
+    left_leader_port: str = "/dev/ttyACM0",
+    left_follower_port: str = "/dev/ttyACM1",
+    right_leader_port: str = "/dev/ttyACM2",
+    right_follower_port: str = "/dev/ttyACM3",
+    **kwargs: Any,
+) -> BimanualSo101Session
+```
+
+### from_single_pair
+
+Create a session from a single arm pair.
+
+```python
+BimanualSo101Session.from_single_pair(
+    *,
+    leader_port: str = "/dev/ttyACM0",
+    follower_port: str = "/dev/ttyACM1",
+    **kwargs: Any,
+) -> BimanualSo101Session
+```
+
+### start
+
+Start the teleoperation session.
+
+```python
+session.start() -> None
+```
+
+### stop
+
+Stop the teleoperation session.
+
+```python
+session.stop() -> None
+```
+
+### go_home
+
+Send all follower arms to their home positions.
+
+```python
+session.go_home() -> None
+```
+
+### start_recording
+
+Start recording an episode.
+
+```python
+session.start_recording(
+    *,
+    label: str | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> str
+```
+
+<ParamField path="label" type="str | None" default="None">
+  Label for the episode
+</ParamField>
+
+<ParamField path="metadata" type="Mapping[str, Any] | None" default="None">
+  Additional metadata
+</ParamField>
+
+<ResponseField name="return" type="str">
+  Episode ID
+</ResponseField>
+
+### stop_recording
+
+Stop recording the current episode.
+
+```python
+session.stop_recording() -> RecordedEpisode
+```
+
+<ResponseField name="return" type="RecordedEpisode">
+  The recorded episode
+</ResponseField>
+
+### record_episode
+
+Record an episode for a fixed duration.
+
+```python
+session.record_episode(
+    *,
+    duration_s: float,
+    label: str | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> RecordedEpisode
+```
+
+<ParamField path="duration_s" type="float" required>
+  Duration to record in seconds
+</ParamField>
+
+<ParamField path="label" type="str | None" default="None">
+  Episode label
+</ParamField>
+
+<ParamField path="metadata" type="Mapping[str, Any] | None" default="None">
+  Additional metadata
+</ParamField>
+
+<ResponseField name="return" type="RecordedEpisode">
+  The recorded episode
+</ResponseField>
+
+### timing_stats
+
+Get loop timing statistics.
+
+```python
+session.timing_stats() -> LoopTimingStats
+```
+
+<ResponseField name="return" type="LoopTimingStats">
+  Timing statistics including jitter, overruns, and period measurements
+</ResponseField>
+
+### reset_timing_stats
+
+Reset accumulated loop timing counters.
+
+```python
+session.reset_timing_stats() -> None
+```
+
+### check_health
+
+Check session health and raise if errors occurred.
+
+```python
+session.check_health() -> None
+```
+
+### run
+
+Run teleoperation until Ctrl+C.
+
+```python
+session.run() -> None
+```
+
+### Properties
+
+<ResponseField name="is_running" type="bool">
+  Whether the session is currently running
+</ResponseField>
+
+<ResponseField name="is_recording" type="bool">
+  Whether an episode is currently being recorded
+</ResponseField>
+
+### Example
+
+```python
+from rfx.teleop import BimanualSo101Session
+from rfx.teleop.config import TeleopSessionConfig
+
+session = BimanualSo101Session.from_single_pair(
+    leader_port="/dev/ttyACM0",
+    follower_port="/dev/ttyACM1"
+)
+
+with session:
+    episode = session.record_episode(duration_s=30.0, label="demo")
+    print(f"Recorded {len(episode.control_steps)} control steps")
+```
+
+## LoopTimingStats
+
+Loop timing summary for jitter and overrun analysis.
+
+```python
+@dataclass(frozen=True)
+class LoopTimingStats:
+    iterations: int
+    overruns: int
+    target_period_s: float
+    avg_period_s: float
+    p50_jitter_s: float
+    p95_jitter_s: float
+    p99_jitter_s: float
+    max_jitter_s: float
+```
+
+<ResponseField name="iterations" type="int">
+  Total number of control loop iterations
+</ResponseField>
+
+<ResponseField name="overruns" type="int">
+  Number of iterations that exceeded the target period
+</ResponseField>
+
+<ResponseField name="target_period_s" type="float">
+  Target period in seconds
+</ResponseField>
+
+<ResponseField name="avg_period_s" type="float">
+  Average actual period in seconds
+</ResponseField>
+
+<ResponseField name="p50_jitter_s" type="float">
+  Median jitter in seconds
+</ResponseField>
+
+<ResponseField name="p95_jitter_s" type="float">
+  95th percentile jitter in seconds
+</ResponseField>
+
+<ResponseField name="p99_jitter_s" type="float">
+  99th percentile jitter in seconds
+</ResponseField>
+
+<ResponseField name="max_jitter_s" type="float">
+  Maximum jitter in seconds
+</ResponseField>
+
+### to_dict
+
+Convert to a dictionary.
+
+```python
+stats.to_dict() -> dict[str, float | int]
+```
+
+## Configuration Types
+
+### ArmPairConfig
+
+Configuration for a leader/follower arm pair.
+
+```python
+@dataclass
+class ArmPairConfig:
+    name: str
+    leader_port: str
+    follower_port: str
+```
+
+### CameraStreamConfig
+
+Configuration for a camera stream.
+
+```python
+@dataclass
+class CameraStreamConfig:
+    name: str
+    device_id: int
+    width: int
+    height: int
+    fps: int
+```
+
+### TeleopSessionConfig
+
+Configuration for a teleoperation session.
+
+```python
+@dataclass
+class TeleopSessionConfig:
+    arm_pairs: tuple[ArmPairConfig, ...]
+    rate_hz: float
+    output_dir: Path
+    cameras: tuple[CameraStreamConfig, ...]
+    transport: TransportConfig
+    max_timing_samples: int
+```
+
+## Transport
+
+### create_transport
+
+Create a transport instance from configuration.
+
+```python
+rfx.teleop.create_transport(
+    config: TransportConfig | None = None
+) -> TransportLike
+```
+
+### rust_transport_available
+
+Check if Rust transport is available.
+
+```python
+rfx.teleop.rust_transport_available() -> bool
+```
+
+### zenoh_transport_available
+
+Check if Zenoh transport is available.
+
+```python
+rfx.teleop.zenoh_transport_available() -> bool
+```
+
+## Benchmarking
+
+### run_jitter_benchmark
+
+Run a jitter benchmark.
+
+```python
+rfx.teleop.run_jitter_benchmark(
+    rate_hz: float,
+    duration_s: float
+) -> JitterBenchmarkResult
+```
+
+<ParamField path="rate_hz" type="float" required>
+  Target loop rate in Hz
+</ParamField>
+
+<ParamField path="duration_s" type="float" required>
+  Duration to run benchmark in seconds
+</ParamField>
+
+<ResponseField name="return" type="JitterBenchmarkResult">
+  Benchmark results including timing statistics
+</ResponseField>
+
+### assert_jitter_budget
+
+Assert that jitter is within acceptable bounds.
+
+```python
+rfx.teleop.assert_jitter_budget(
+    stats: LoopTimingStats,
+    max_p99_jitter_s: float
+) -> None
+```
+
+<ParamField path="stats" type="LoopTimingStats" required>
+  Timing statistics to check
+</ParamField>
+
+<ParamField path="max_p99_jitter_s" type="float" required>
+  Maximum acceptable p99 jitter in seconds
+</ParamField>

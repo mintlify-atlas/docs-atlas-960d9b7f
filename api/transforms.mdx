@@ -1,0 +1,396 @@
+---
+title: "rfx.tf"
+description: "Transform tree (tf2-equivalent)"
+---
+
+# rfx.tf
+
+Thread-safe transform buffer with BFS frame graph, timestamp interpolation, broadcaster, and listener. All transforms are published via pub/sub on `rfx/tf/{parent}/{child}`.
+
+```python
+from rfx.tf import TransformBuffer, TransformBroadcaster, TransformListener
+
+# Create buffer and broadcaster
+buffer = TransformBuffer()
+broadcaster = TransformBroadcaster(transport, buffer)
+
+# Broadcast a transform
+tf = TransformStamped(
+    parent_frame="world",
+    child_frame="robot_base",
+    timestamp_ns=time.time_ns(),
+    translation=(1.0, 0.0, 0.5),
+    rotation=(0.0, 0.0, 0.0, 1.0)
+)
+broadcaster.send_transform(tf)
+
+# Look up transform
+tf = buffer.lookup("world", "robot_base")
+```
+
+## TransformStamped
+
+Represents a transform between two coordinate frames at a specific timestamp.
+
+### Constructor
+
+```python
+TransformStamped(
+    parent_frame: str,
+    child_frame: str,
+    timestamp_ns: int,
+    translation: tuple[float, float, float],
+    rotation: tuple[float, float, float, float]
+)
+```
+
+<ParamField path="parent_frame" type="str" required>
+  Name of the parent frame.
+</ParamField>
+
+<ParamField path="child_frame" type="str" required>
+  Name of the child frame.
+</ParamField>
+
+<ParamField path="timestamp_ns" type="int" required>
+  Timestamp in nanoseconds.
+</ParamField>
+
+<ParamField path="translation" type="tuple[float, float, float]" required>
+  Translation vector (x, y, z).
+</ParamField>
+
+<ParamField path="rotation" type="tuple[float, float, float, float]" required>
+  Rotation as quaternion (x, y, z, w).
+</ParamField>
+
+### Methods
+
+#### to_dict
+
+```python
+tf.to_dict() -> dict
+```
+
+Serialize to a dictionary.
+
+<ResponseField name="return" type="dict">
+  Dictionary representation with all fields.
+</ResponseField>
+
+#### from_dict
+
+```python
+@staticmethod
+TransformStamped.from_dict(d: dict) -> TransformStamped
+```
+
+Deserialize from a dictionary.
+
+<ParamField path="d" type="dict" required>
+  Dictionary containing transform data.
+</ParamField>
+
+<ResponseField name="return" type="TransformStamped">
+  Reconstructed TransformStamped.
+</ResponseField>
+
+#### identity
+
+```python
+@staticmethod
+TransformStamped.identity(parent: str, child: str) -> TransformStamped
+```
+
+Create an identity transform.
+
+<ParamField path="parent" type="str" required>
+  Parent frame name.
+</ParamField>
+
+<ParamField path="child" type="str" required>
+  Child frame name.
+</ParamField>
+
+<ResponseField name="return" type="TransformStamped">
+  Identity transform with zero translation and unit quaternion.
+</ResponseField>
+
+---
+
+## TransformBuffer
+
+Thread-safe buffer of transforms with frame graph and BFS lookup.
+
+```python
+from rfx.tf import TransformBuffer, TransformStamped
+import time
+
+buffer = TransformBuffer(max_history=100)
+
+# Add transforms
+tf1 = TransformStamped(
+    parent_frame="world",
+    child_frame="robot",
+    timestamp_ns=time.time_ns(),
+    translation=(1.0, 0.0, 0.0),
+    rotation=(0.0, 0.0, 0.0, 1.0)
+)
+buffer.set_transform(tf1)
+
+# Look up transform chain
+tf = buffer.lookup("world", "end_effector")
+if tf:
+    print(f"Translation: {tf.translation}")
+```
+
+### Constructor
+
+```python
+TransformBuffer(max_history: int = 100)
+```
+
+<ParamField path="max_history" type="int" default="100">
+  Maximum number of transforms to store per frame pair.
+</ParamField>
+
+### Methods
+
+#### set_transform
+
+```python
+buffer.set_transform(tf: TransformStamped) -> None
+```
+
+Add a transform to the buffer.
+
+<ParamField path="tf" type="TransformStamped" required>
+  Transform to add.
+</ParamField>
+
+#### lookup
+
+```python
+buffer.lookup(
+    target_frame: str,
+    source_frame: str
+) -> TransformStamped | None
+```
+
+Look up transform from source_frame to target_frame using BFS.
+
+<ParamField path="target_frame" type="str" required>
+  Target coordinate frame.
+</ParamField>
+
+<ParamField path="source_frame" type="str" required>
+  Source coordinate frame.
+</ParamField>
+
+<ResponseField name="return" type="TransformStamped | None">
+  Transform from source to target, or None if no path exists.
+</ResponseField>
+
+#### all_frames
+
+```python
+buffer.all_frames() -> list[str]
+```
+
+Get list of all known frames.
+
+<ResponseField name="return" type="list[str]">
+  Sorted list of frame names.
+</ResponseField>
+
+---
+
+## TransformBroadcaster
+
+Publishes transforms to transport on `rfx/tf/{parent}/{child}`.
+
+```python
+from rfx.tf import TransformBroadcaster, TransformBuffer
+
+buffer = TransformBuffer()
+broadcaster = TransformBroadcaster(transport, buffer)
+
+tf = TransformStamped(...)
+broadcaster.send_transform(tf)
+```
+
+### Constructor
+
+```python
+TransformBroadcaster(
+    transport: Any,
+    buffer: TransformBuffer | None = None
+)
+```
+
+<ParamField path="transport" type="Any" required>
+  Transport layer for publishing (e.g., MQTT, ZeroMQ).
+</ParamField>
+
+<ParamField path="buffer" type="TransformBuffer | None" default="None">
+  Optional buffer to also update locally when broadcasting.
+</ParamField>
+
+### Methods
+
+#### send_transform
+
+```python
+broadcaster.send_transform(tf: TransformStamped) -> None
+```
+
+Broadcast a transform.
+
+<ParamField path="tf" type="TransformStamped" required>
+  Transform to broadcast.
+</ParamField>
+
+---
+
+## StaticTransformBroadcaster
+
+Broadcasts latched/static transforms with periodic republish.
+
+```python
+from rfx.tf import StaticTransformBroadcaster
+
+static_broadcaster = StaticTransformBroadcaster(
+    transport,
+    buffer,
+    republish_interval_s=10.0
+)
+
+# Broadcast static transform (will be republished every 10s)
+tf = TransformStamped(...)
+static_broadcaster.send_transform(tf)
+```
+
+### Constructor
+
+```python
+StaticTransformBroadcaster(
+    transport: Any,
+    buffer: TransformBuffer | None = None,
+    republish_interval_s: float = 10.0
+)
+```
+
+<ParamField path="transport" type="Any" required>
+  Transport layer for publishing.
+</ParamField>
+
+<ParamField path="buffer" type="TransformBuffer | None" default="None">
+  Optional buffer to update locally.
+</ParamField>
+
+<ParamField path="republish_interval_s" type="float" default="10.0">
+  Interval in seconds to republish static transforms.
+</ParamField>
+
+### Methods
+
+#### send_transform
+
+```python
+static_broadcaster.send_transform(tf: TransformStamped) -> None
+```
+
+Broadcast a static transform (will be republished periodically).
+
+<ParamField path="tf" type="TransformStamped" required>
+  Static transform to broadcast.
+</ParamField>
+
+#### stop
+
+```python
+static_broadcaster.stop() -> None
+```
+
+Stop the republish thread.
+
+---
+
+## TransformListener
+
+Subscribes to `rfx/tf/**` and populates a TransformBuffer.
+
+```python
+from rfx.tf import TransformListener, TransformBuffer
+
+buffer = TransformBuffer()
+listener = TransformListener(transport, buffer)
+
+# Buffer is now automatically updated as transforms are received
+time.sleep(1.0)
+tf = buffer.lookup("world", "robot")
+```
+
+### Constructor
+
+```python
+TransformListener(
+    transport: Any,
+    buffer: TransformBuffer
+)
+```
+
+<ParamField path="transport" type="Any" required>
+  Transport layer for subscribing.
+</ParamField>
+
+<ParamField path="buffer" type="TransformBuffer" required>
+  Buffer to populate with received transforms.
+</ParamField>
+
+### Methods
+
+#### stop
+
+```python
+listener.stop() -> None
+```
+
+Stop the listener thread.
+
+---
+
+## broadcast_urdf_transforms
+
+Broadcast all transforms from a URDF model given joint positions.
+
+```python
+from rfx.tf import broadcast_urdf_transforms, TransformBroadcaster
+
+broadcaster = TransformBroadcaster(transport)
+joint_positions = {"joint1": 0.5, "joint2": -0.3}
+
+broadcast_urdf_transforms(urdf, joint_positions, broadcaster)
+```
+
+### Function Signature
+
+```python
+broadcast_urdf_transforms(
+    urdf: Any,
+    joint_positions: dict[str, float] | list[float],
+    broadcaster: TransformBroadcaster
+) -> None
+```
+
+<ParamField path="urdf" type="Any" required>
+  URDF model object with `forward_kinematics` method.
+</ParamField>
+
+<ParamField path="joint_positions" type="dict[str, float] | list[float]" required>
+  Joint positions as a dictionary mapping joint names to values, or a list of values.
+</ParamField>
+
+<ParamField path="broadcaster" type="TransformBroadcaster" required>
+  Broadcaster to use for publishing transforms.
+</ParamField>

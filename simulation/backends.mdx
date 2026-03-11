@@ -1,0 +1,435 @@
+---
+title: Simulation Backends
+description: Detailed guide to Genesis, MuJoCo MJX, and Mock simulation backends
+---
+
+## Backend Selection
+
+Choose a simulation backend based on your use case:
+
+| Backend | Performance | Dependencies | Best For |
+|---------|------------|--------------|----------|
+| **Genesis** | GPU-parallel | `genesis-world`, `torch` | RL training, visualization |
+| **MuJoCo MJX** | JAX JIT | `mujoco`, `mjx`, `jax[cuda]` | Research, custom gradients |
+| **Mock** | CPU single-thread | `torch` only | Testing, CI/CD |
+
+All backends implement the same `SimRobot` interface, so switching is as simple as changing the `backend` parameter.
+
+## Genesis Backend
+
+Genesis provides GPU-accelerated physics with thousands of parallel environments and built-in visualization.
+
+### Installation
+
+<CodeGroup>
+```bash Using uv (recommended)
+uv pip install --python 3.13 torch
+uv pip install --python 3.13 genesis-world
+```
+
+```bash Using pip
+pip install torch
+pip install genesis-world
+```
+
+```bash Optional dependencies
+uv pip install "rfx-sdk[sim-genesis]"
+```
+</CodeGroup>
+
+<Warning>
+**Python 3.13 Required:** Genesis dependencies do not currently publish wheels for CPython 3.14. Use Python 3.13 or earlier.
+</Warning>
+
+### Basic Usage
+
+From the `rfx/examples/genesis_viewer.py` example:
+
+```python
+import torch
+import rfx
+from rfx.config import SO101_CONFIG
+
+# Create Genesis-backed robot with viewer
+robot = rfx.SimRobot.from_config(
+    SO101_CONFIG.to_dict(),
+    num_envs=1,
+    backend="genesis",
+    device="cuda" if torch.cuda.is_available() else "cpu",
+    substeps=4,
+    viewer=True,
+    auto_install=True,  # Auto-install genesis-world if missing
+)
+
+print(f"Robot: {robot}")
+# Output: SimRobot(backend='genesis', num_envs=1, state_dim=12, device='cuda')
+
+# Reset and run simulation
+obs = robot.reset()
+action_dim = robot.max_action_dim
+control_dt = 1.0 / robot.config.control_freq_hz
+
+for step in range(2000):
+    t = step * control_dt
+    action = torch.zeros(1, action_dim, device="cuda")
+    
+    # Simple sinusoidal motion
+    action[:, 0] = 0.25 * torch.sin(torch.tensor(t, device="cuda"))
+    action[:, 1] = 0.25 * torch.cos(torch.tensor(t, device="cuda"))
+    
+    robot.act(action)
+    obs = robot.observe()
+    
+    if step % 100 == 0:
+        norm = obs["state"].norm(dim=-1).mean().item()
+        print(f"step={step:5d}  state_norm={norm:.4f}")
+
+robot.close()
+```
+
+### Auto-Install Behavior
+
+Genesis can auto-install if missing:
+
+```python
+robot = SimRobot.from_config(
+    config_path,
+    backend="genesis",
+    auto_install=True,  # Automatically install genesis-world
+)
+```
+
+Or enable globally via environment variable:
+
+```bash
+export RFX_AUTO_INSTALL_GENESIS=1
+```
+
+The auto-installer tries:
+1. `uv pip install --python <interpreter> genesis-world` (if `uv` available)
+2. `<interpreter> -m pip install genesis-world` (fallback)
+
+### Parallel Environments
+
+Genesis excels at massively parallel simulation:
+
+```python
+robot = SimRobot.from_config(
+    "rfx/configs/so101.yaml",
+    backend="genesis",
+    num_envs=4096,  # 4096 parallel environments on GPU
+    device="cuda",
+)
+
+obs = robot.reset()  # (4096, 64)
+action = torch.randn(4096, robot.max_action_dim, device="cuda")
+robot.act(action)    # Step all 4096 envs in parallel
+```
+
+### Configuration Options
+
+Genesis backend supports these parameters:
+
+```python
+robot = SimRobot.from_config(
+    config_path,
+    backend="genesis",
+    viewer=True,           # Enable 3D viewer
+    dt=0.002,              # Timestep in seconds
+    substeps=4,            # Physics substeps per step
+    gravity=(0, 0, -9.81), # Gravity vector
+    robot_pos=(0, 0, 0.5), # Initial robot position
+    max_steps=1000,        # Episode length
+    auto_install=True,     # Auto-install if missing
+)
+```
+
+### Running Examples
+
+<CodeGroup>
+```bash Basic viewer
+uv run --python 3.13 rfx/examples/genesis_viewer.py
+```
+
+```bash With options
+uv run --python 3.13 rfx/examples/genesis_viewer.py \
+  --num-envs 1 \
+  --steps 2000 \
+  --substeps 4 \
+  --auto-install
+```
+
+```bash Go2 quadruped (requires URDF assets)
+uv run --python 3.13 rfx/examples/universal_go2.py \
+  --backend genesis \
+  --auto-install
+```
+</CodeGroup>
+
+### Headless Mode
+
+For training without visualization:
+
+```python
+robot = SimRobot.from_config(
+    config_path,
+    backend="genesis",
+    viewer=False,  # No viewer window
+    device="cuda",
+)
+```
+
+## MuJoCo MJX Backend
+
+MuJoCo MJX provides JAX-accelerated physics with JIT compilation and automatic differentiation.
+
+### Installation
+
+```bash
+pip install torch
+pip install mujoco mujoco-mjx jax[cuda13] warp-lang
+```
+
+Or install optional dependencies:
+
+```bash
+uv pip install "rfx-sdk[sim-mjx]"
+```
+
+### Basic Usage
+
+From `rfx/python/rfx/sim/mjx.py`:
+
+```python
+import torch
+from rfx.sim import SimRobot
+
+# Create MuJoCo MJX-backed robot
+robot = SimRobot.from_config(
+    "rfx/configs/so101.yaml",
+    backend="mjx",
+    num_envs=512,
+    device="cuda",
+)
+
+obs = robot.reset()
+action = torch.randn(512, robot.max_action_dim, device="cuda")
+robot.act(action)
+```
+
+### Implementation Details
+
+The MJX backend (`rfx/python/rfx/sim/mjx.py:20-138`) converts between PyTorch and JAX:
+
+```python
+class MjxBackend:
+    """MuJoCo MJX backend for JAX-accelerated simulation."""
+
+    def __init__(self, config, num_envs=1, device="cuda", **kwargs):
+        import jax
+        import mujoco
+        from mujoco import mjx
+        
+        # Load MuJoCo model from XML/URDF
+        if config.urdf_path:
+            xml_path = config.urdf_path.replace(".urdf", ".xml")
+            self._model = mujoco.MjModel.from_xml_path(xml_path)
+        else:
+            self._model = self._create_default_model()
+        
+        # Create batched JAX simulation
+        self._mjx_model = mjx.put_model(self._model)
+        self._batched_data = jax.vmap(lambda _: self._mjx_data)(jnp.arange(num_envs))
+        self._step_fn = jax.jit(jax.vmap(mjx.step, in_axes=(None, 0)))
+    
+    def act(self, action: torch.Tensor) -> None:
+        # Convert PyTorch action to JAX
+        ctrl = self._torch_to_jax(action)
+        self._batched_data = self._batched_data.replace(ctrl=ctrl)
+        
+        # JIT-compiled parallel step
+        self._batched_data = self._step_fn(self._mjx_model, self._batched_data)
+```
+
+### URDF/MJCF Requirements
+
+MJX requires MJCF (MuJoCo XML) format. If you have URDF:
+
+```bash
+# Convert URDF to MJCF
+rfx/assets/robots/go2/
+├── urdf/
+│   ├── go2.urdf
+│   └── meshes/...
+└── mjcf/
+    └── go2.xml  # Converted for MJX
+```
+
+## Mock Backend
+
+The Mock backend provides a lightweight CPU-based simulator with zero external dependencies (beyond PyTorch).
+
+### Installation
+
+No installation required - Mock is built-in:
+
+```python
+from rfx.sim import SimRobot
+
+robot = SimRobot.from_config(
+    "rfx/configs/so101.yaml",
+    backend="mock",  # No extra dependencies!
+    device="cpu",
+)
+```
+
+### Implementation
+
+From `rfx/python/rfx/sim/mock.py:19-81`, the Mock backend uses a simple spring-damper model:
+
+```python
+class MockBackend:
+    """Mock physics backend - pure PyTorch, no dependencies."""
+    
+    def __init__(self, config, num_envs=1, device="cpu", **kwargs):
+        self.config = config
+        self.num_envs = num_envs
+        self.device = device
+        
+        self._positions = torch.zeros(num_envs, config.action_dim, device=device)
+        self._velocities = torch.zeros(num_envs, config.action_dim, device=device)
+        self._dt = 1.0 / config.control_freq_hz
+    
+    def act(self, action: torch.Tensor) -> None:
+        action = action[:, :self.config.action_dim]
+        
+        # Simple PD controller physics
+        k, d = 100.0, 10.0
+        error = action - self._positions
+        acceleration = k * error - d * self._velocities
+        
+        # Integrate
+        self._velocities = self._velocities + acceleration * self._dt
+        self._positions = self._positions + self._velocities * self._dt
+        
+        # Clamp to joint limits
+        self._positions = torch.clamp(self._positions, -3.14159, 3.14159)
+        self._velocities = torch.clamp(self._velocities, -10.0, 10.0)
+```
+
+### Use Cases
+
+Mock is ideal for:
+
+<CardGroup cols={2}>
+  <Card title="Unit Testing" icon="flask">
+    Test robot interfaces without installing simulation dependencies
+  </Card>
+  <Card title="CI/CD" icon="infinity">
+    Run automated tests in GitHub Actions or other CI systems
+  </Card>
+  <Card title="Prototyping" icon="drafting-compass">
+    Quickly test control logic on CPU
+  </Card>
+  <Card title="Documentation" icon="book">
+    Generate examples without heavy dependencies
+  </Card>
+</CardGroup>
+
+### Example Usage
+
+```python
+import torch
+from rfx.sim import SimRobot
+
+# Create mock robot (CPU, no dependencies)
+robot = SimRobot.from_config(
+    "rfx/configs/so101.yaml",
+    backend="mock",
+    num_envs=8,
+    device="cpu",
+)
+
+obs = robot.reset()  # (8, 64)
+action = torch.randn(8, robot.max_action_dim)
+robot.act(action)
+obs = robot.observe()
+
+reward = robot.get_reward()  # (8,)
+done = robot.get_done()      # (8,)
+```
+
+## Switching Backends
+
+All backends use identical APIs. Switch with a single parameter:
+
+<CodeGroup>
+```python Genesis
+robot = SimRobot.from_config(
+    config_path,
+    backend="genesis",
+    num_envs=4096,
+    device="cuda",
+)
+```
+
+```python MuJoCo MJX
+robot = SimRobot.from_config(
+    config_path,
+    backend="mjx",
+    num_envs=512,
+    device="cuda",
+)
+```
+
+```python Mock
+robot = SimRobot.from_config(
+    config_path,
+    backend="mock",
+    num_envs=8,
+    device="cpu",
+)
+```
+</CodeGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Genesis installation fails on Python 3.14">
+    **Solution:** Use Python 3.13 or earlier until upstream Genesis publishes cp314 wheels:
+    
+    ```bash
+    uv run --python 3.13 rfx/examples/genesis_viewer.py
+    ```
+  </Accordion>
+  
+  <Accordion title="Genesis viewer window doesn't appear">
+    **Solutions:**
+    - Check graphics support: `--device cpu`
+    - Try headless mode: `viewer=False`
+    - Verify Genesis install: `uv pip install genesis-world`
+  </Accordion>
+  
+  <Accordion title="MJX import errors">
+    **Solution:** Install all MJX dependencies:
+    
+    ```bash
+    pip install mujoco mujoco-mjx jax[cuda13] warp-lang
+    ```
+  </Accordion>
+  
+  <Accordion title="Need faster iteration during development">
+    **Solution:** Use Mock backend for rapid testing, then switch to Genesis/MJX for validation:
+    
+    ```python
+    backend = "mock" if args.fast else "genesis"
+    robot = SimRobot.from_config(config, backend=backend)
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<Card title="MockRobot for Testing" icon="vial" href="/simulation/mock-robot">
+  Learn about the standalone MockRobot class for unit testing
+</Card>

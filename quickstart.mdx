@@ -1,80 +1,207 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get from zero to a deployed policy in 5 minutes
 ---
 
-## Get started in three steps
+Get your first rfx policy running in minutes. This guide takes you from installation through recording demos to deploying a trained policy.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+<CardGroup cols={2}>
+  <Card title="Python 3.13+" icon="python">
+    rfx requires Python 3.13 or later
+  </Card>
+  <Card title="Rust toolchain" icon="rust">
+    Install via [rustup.rs](https://rustup.rs)
+  </Card>
+</CardGroup>
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+<Steps>
 
-### Step 2: Deploy your changes
+### Install rfx
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+Install the rfx SDK using uv (recommended) or pip:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<CodeGroup>
+```bash uv
+uv pip install rfx-sdk
+```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+```bash pip
+pip install rfx-sdk
+```
+</CodeGroup>
 
-### Step 3: Go live
+<Note>
+For development or source installation, see the [Installation](/installation) guide.
+</Note>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+### Verify your setup
+
+Run the doctor command to check your installation:
+
+```bash
+rfx doctor
+```
+
+This checks for:
+- Core dependencies (tinygrad, numpy, PyYAML)
+- Optional packages (torch, lerobot, opencv)
+- Rust extension build
+- Available simulation backends
+- Connected hardware
+
+### Write a simple policy
+
+A policy is any callable that takes observations and returns actions. Create `my_policy.py`:
+
+```python my_policy.py
+import torch
+import rfx
+
+@rfx.policy
+def hold_position(obs):
+    """Hold the robot still."""
+    return torch.zeros(1, 64)  # 64-dim action space
+```
+
+For named joint control instead of raw tensor indices:
+
+```python
+@rfx.policy
+def grasp(obs):
+    return rfx.MotorCommands(
+        {"gripper": 0.8, "wrist_pitch": -0.2},
+        config=rfx.SO101_CONFIG,
+    ).to_tensor()
+```
+
+### Test without hardware
+
+Use MockRobot to validate your policy before deploying to real hardware:
+
+```bash
+rfx deploy my_policy.py --robot so101 --mock --duration 5
+```
+
+The mock robot runs a simple physics simulation with the same `observe()`, `act()`, `reset()` interface as real hardware.
+
+### Deploy to real hardware
+
+Once you have a trained policy checkpoint, deploy it to hardware:
+
+```bash
+# From a local checkpoint
+rfx deploy runs/my-policy --robot so101
+
+# From HuggingFace Hub
+rfx deploy hf://rfx-community/go2-walk-v1 --robot go2
+
+# Control the duration
+rfx deploy runs/my-policy --robot so101 --duration 30
+```
+
+<Warning>
+Always test with `--mock` first to validate policy outputs and control loop timing before deploying to real hardware.
+</Warning>
+
+### Record demonstrations
+
+Collect teleoperation data for training:
+
+```bash
+rfx record --robot so101 --repo-id my-org/demos --episodes 10
+```
+
+This creates a LeRobot-compatible dataset that you can use for training.
+
+**Recording controls:**
+- **Enter** - Start/stop recording
+- **h** - Send robot to home position
+- **q** - Quit and save
+
+</Steps>
+
+## Complete example
+
+Here's a full workflow from policy definition to deployment:
+
+```python deploy_example.py
+import torch
+import torch.nn as nn
+import rfx
+from rfx.config import SO101_CONFIG
+
+class SimpleVLA(nn.Module):
+    """Minimal MLP: obs["state"] → action."""
+
+    def __init__(self, state_dim: int, action_dim: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(state_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, action_dim),
+        )
+
+    def forward(self, obs: dict) -> torch.Tensor:
+        return self.net(obs["state"])
+
+# Create robot (mock or real)
+robot = rfx.MockRobot(state_dim=12, action_dim=6)
+# robot = rfx.RealRobot.from_config(SO101_CONFIG, port="/dev/ttyACM0")
+
+# Create policy
+policy = SimpleVLA(robot.max_state_dim, robot.max_action_dim)
+policy.eval()
+
+# Deploy
+stats = rfx.run(robot, policy, rate_hz=50, duration=10)
+
+print(f"Completed {stats.iterations} steps")
+print(f"Average period: {stats.avg_period_s * 1000:.2f}ms")
+print(f"Jitter p95: {stats.p95_jitter_s * 1000:.2f}ms")
+```
+
+Run it:
+
+```bash
+# Test in mock mode
+python deploy_example.py
+
+# Or use the CLI
+uv run deploy_example.py --mock --duration 10
+```
+
+## The robot interface
+
+Every robot in rfx implements the same three methods:
+
+```python
+obs = robot.observe()    # {"state": Tensor(1, 64), "images": ...}
+robot.act(action)        # Tensor(1, 64)
+robot.reset()
+```
+
+This works identically for:
+- `rfx.RealRobot` - Hardware via serial/ethernet
+- `rfx.SimRobot` - Genesis, MJX, or other backends
+- `rfx.MockRobot` - Zero-dependency physics model
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
-
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Installation" icon="download" href="/installation">
+    Learn about all installation methods and optional dependencies
+  </Card>
+  <Card title="Python SDK" icon="code" href="/api/robot">
+    Explore the full Python API reference
+  </Card>
+  <Card title="SO-101 Setup" icon="robot" href="/hardware/so101">
+    Configure and calibrate your SO-101 arm
+  </Card>
+  <Card title="Simulation" icon="cube" href="/simulation/overview">
+    Set up Genesis, MJX, or other sim backends
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

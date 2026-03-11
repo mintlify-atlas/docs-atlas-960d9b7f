@@ -1,0 +1,227 @@
+---
+title: rfx record
+description: Record teleoperation demonstrations from hardware into LeRobot datasets
+---
+
+`rfx record` collects demonstration episodes from a robot and saves them as a LeRobot-compatible dataset.
+
+## Basic Usage
+
+```bash
+rfx record --robot so101 --repo-id my-org/demos --episodes 10
+```
+
+This command:
+
+1. Connects to the robot hardware
+2. Records 10 demonstration episodes
+3. Saves them to `datasets/my-org/demos/` as a LeRobot dataset
+4. Prints summary: episodes recorded, total frames, output path
+
+## Arguments
+
+### Required
+
+<ParamField path="--robot" type="string" required>
+  Robot type to record from. Examples: `so101`, `go2`, `g1`
+</ParamField>
+
+<ParamField path="--repo-id" type="string" required>
+  HuggingFace dataset repository ID. Can be `username/dataset-name` or just `dataset-name` for local-only.
+</ParamField>
+
+### Optional
+
+<ParamField path="--output" type="string" default="datasets">
+  Output root directory where datasets are saved.
+  
+  ```bash
+  rfx record --robot so101 --repo-id demos --output ./my-datasets
+  ```
+</ParamField>
+
+<ParamField path="--episodes" type="int" default="1">
+  Number of episodes to record.
+  
+  ```bash
+  rfx record --robot so101 --repo-id demos --episodes 50
+  ```
+</ParamField>
+
+<ParamField path="--duration" type="float" default="None">
+  Maximum duration per episode in seconds. If not specified, each episode continues until manually stopped.
+  
+  ```bash
+  rfx record --robot so101 --repo-id demos --episodes 10 --duration 30
+  ```
+</ParamField>
+
+<ParamField path="--task" type="string" default="default">
+  Task label to attach to episodes. Useful for multi-task datasets.
+  
+  ```bash
+  rfx record --robot so101 --repo-id demos --task "pick_and_place"
+  ```
+</ParamField>
+
+<ParamField path="--fps" type="int" default="30">
+  Recording frame rate (frames per second).
+  
+  ```bash
+  rfx record --robot so101 --repo-id demos --fps 60
+  ```
+</ParamField>
+
+<ParamField path="--push" type="boolean" default="false">
+  Push dataset to HuggingFace Hub after collection completes.
+  
+  ```bash
+  rfx record --robot so101 --repo-id my-org/demos --episodes 10 --push
+  ```
+</ParamField>
+
+<ParamField path="--mcap" type="boolean" default="false">
+  Also log an MCAP sidecar file for replay and debugging.
+  
+  ```bash
+  rfx record --robot so101 --repo-id demos --mcap
+  ```
+</ParamField>
+
+<ParamField path="--state-dim" type="int" default="6">
+  State dimension override. Normally auto-detected from robot config.
+  
+  ```bash
+  rfx record --robot so101 --repo-id demos --state-dim 12
+  ```
+</ParamField>
+
+## Examples
+
+### Record 10 episodes for SO-101 arm
+
+```bash
+rfx record --robot so101 --repo-id my-org/demos --episodes 10
+```
+
+### Record and push to HuggingFace Hub
+
+```bash
+rfx record --robot so101 --repo-id my-org/pick-demos --episodes 20 --push
+```
+
+### Record with 60 FPS and 30-second episodes
+
+```bash
+rfx record --robot so101 --repo-id demos --episodes 5 --duration 30 --fps 60
+```
+
+### Record multi-task dataset with task labels
+
+```bash
+rfx record --robot so101 --repo-id demos --task "pick_cube" --episodes 10
+rfx record --robot so101 --repo-id demos --task "stack_blocks" --episodes 10
+```
+
+### Record with MCAP sidecar for debugging
+
+```bash
+rfx record --robot so101 --repo-id demos --episodes 5 --mcap
+```
+
+## Output Format
+
+Recorded datasets follow the LeRobot dataset structure:
+
+```
+datasets/my-org/demos/
+├── data/
+│   ├── chunk-000/
+│   │   ├── observation.state.bin
+│   │   ├── action.bin
+│   │   └── ...
+├── meta/
+│   └── info.json
+└── videos/
+    └── ...
+```
+
+This format is compatible with:
+- LeRobot training pipelines
+- HuggingFace datasets library
+- rfx training tools
+
+## Stopping Recording
+
+Press **Ctrl+C** to stop recording gracefully:
+
+```
+[rfx] Recording stopped.
+[rfx] Recorded 3 episodes, 1842 frames
+[rfx] Saved to datasets/demos
+```
+
+## Output Information
+
+After successful recording, rfx prints:
+
+```
+[rfx] Recorded 10 episodes, 4532 frames
+[rfx] Saved to datasets/my-org/demos
+```
+
+- **episodes**: Number of complete episodes recorded
+- **frames**: Total observation frames across all episodes
+- **path**: Location of the saved dataset
+
+## Python API
+
+You can also record from Python:
+
+```python
+import rfx
+
+result = rfx.collection.collect(
+    robot="so101",
+    repo_id="my-org/demos",
+    episodes=10,
+    duration=30,
+    fps=30,
+    push=False,
+)
+
+print(f"Recorded {result['episodes']} episodes")
+print(f"Saved to {result['root']}")
+```
+
+## Troubleshooting
+
+### Robot not found
+
+If the robot isn't detected:
+
+```bash
+rfx doctor  # Check hardware detection
+```
+
+### Permission denied on serial port
+
+On Linux, add your user to the `dialout` group:
+
+```bash
+sudo usermod -aG dialout $USER
+# Log out and back in
+```
+
+### Low frame rate
+
+If actual FPS is lower than requested:
+- Check USB connection quality
+- Reduce `--fps` value
+- Ensure robot firmware is up to date
+
+## See Also
+
+- [Deploy command](/cli/deploy) - Run policies on hardware
+- [Doctor command](/cli/doctor) - Check environment setup
+- [Robot API](/api/robot) - Robot configuration and interface

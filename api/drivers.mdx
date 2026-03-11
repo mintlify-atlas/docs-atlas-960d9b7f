@@ -1,0 +1,226 @@
+---
+title: "rfx.drivers"
+description: "Robot driver plugin registry"
+---
+
+# rfx.drivers
+
+Register and discover robot drivers via entry_points or explicit registration. Provides a unified interface for connecting to different robot platforms.
+
+```python
+from rfx.drivers import register_driver, get_driver, list_drivers
+
+# Register a custom driver
+class MyRobotDriver:
+    def connect(self, **kwargs):
+        pass
+    
+    def disconnect(self):
+        pass
+    
+    def is_connected(self) -> bool:
+        return True
+    
+    def read_state(self) -> dict:
+        return {"joint_positions": [0.0] * 6}
+    
+    def send_command(self, command: dict) -> None:
+        pass
+    
+    @property
+    def name(self) -> str:
+        return "my_robot"
+    
+    @property
+    def num_joints(self) -> int:
+        return 6
+
+register_driver("my_robot", MyRobotDriver)
+
+# Get and use the driver
+driver_cls = get_driver("my_robot")
+driver = driver_cls()
+driver.connect()
+state = driver.read_state()
+```
+
+## RobotDriver Protocol
+
+Protocol that all robot drivers must implement.
+
+### Methods
+
+#### connect
+
+```python
+driver.connect(**kwargs: Any) -> None
+```
+
+Connect to the robot.
+
+<ParamField path="**kwargs" type="Any">
+  Driver-specific connection parameters (e.g., IP address, serial port).
+</ParamField>
+
+#### disconnect
+
+```python
+driver.disconnect() -> None
+```
+
+Disconnect from the robot.
+
+#### is_connected
+
+```python
+driver.is_connected() -> bool
+```
+
+Check if the driver is currently connected.
+
+<ResponseField name="return" type="bool">
+  True if connected, False otherwise.
+</ResponseField>
+
+#### read_state
+
+```python
+driver.read_state() -> dict[str, Any]
+```
+
+Read the current robot state.
+
+<ResponseField name="return" type="dict[str, Any]">
+  Dictionary containing robot state (e.g., joint positions, velocities, forces).
+</ResponseField>
+
+#### send_command
+
+```python
+driver.send_command(command: dict[str, Any]) -> None
+```
+
+Send a command to the robot.
+
+<ParamField path="command" type="dict[str, Any]" required>
+  Command dictionary (structure is driver-specific).
+</ParamField>
+
+### Properties
+
+<ResponseField name="name" type="str">
+  Human-readable name of the robot.
+</ResponseField>
+
+<ResponseField name="num_joints" type="int">
+  Number of actuated joints on the robot.
+</ResponseField>
+
+---
+
+## register_driver
+
+Register a driver factory by name.
+
+```python
+from rfx.drivers import register_driver
+
+register_driver("go2", Go2Driver)
+register_driver("so_arm100", SO101Driver)
+```
+
+### Function Signature
+
+```python
+register_driver(
+    name: str,
+    factory: type
+) -> None
+```
+
+<ParamField path="name" type="str" required>
+  Unique name for the driver.
+</ParamField>
+
+<ParamField path="factory" type="type" required>
+  Driver class that implements the RobotDriver protocol.
+</ParamField>
+
+---
+
+## get_driver
+
+Get a registered driver factory by name.
+
+```python
+from rfx.drivers import get_driver
+
+driver_cls = get_driver("go2")
+if driver_cls:
+    driver = driver_cls()
+    driver.connect(ip="192.168.1.100")
+```
+
+### Function Signature
+
+```python
+get_driver(name: str) -> type | None
+```
+
+<ParamField path="name" type="str" required>
+  Name of the driver to retrieve.
+</ParamField>
+
+<ResponseField name="return" type="type | None">
+  Driver class if found, None otherwise.
+</ResponseField>
+
+---
+
+## list_drivers
+
+List all registered driver names.
+
+```python
+from rfx.drivers import list_drivers
+
+available = list_drivers()
+print(f"Available drivers: {available}")
+# Available drivers: ['go2', 'so_arm100', 'my_robot']
+```
+
+### Function Signature
+
+```python
+list_drivers() -> list[str]
+```
+
+<ResponseField name="return" type="list[str]">
+  Sorted list of all registered driver names.
+</ResponseField>
+
+---
+
+## Auto-Discovery
+
+Drivers can be automatically discovered via Python entry points. To make your driver discoverable, add this to your `pyproject.toml`:
+
+```toml
+[project.entry-points."rfx.drivers"]
+my_robot = "my_package.drivers:MyRobotDriver"
+```
+
+Or in `setup.py`:
+
+```python
+setup(
+    name="my-robot-driver",
+    entry_points={
+        "rfx.drivers": [
+            "my_robot = my_package.drivers:MyRobotDriver",
+        ],
+    },
+)
+```
+
+The driver will be automatically registered when `rfx.drivers` is imported.

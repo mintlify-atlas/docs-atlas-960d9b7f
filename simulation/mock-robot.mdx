@@ -1,0 +1,506 @@
+---
+title: MockRobot for Testing
+description: Standalone mock robot for unit testing without simulation dependencies
+---
+
+## Overview
+
+`MockRobot` is a standalone testing class that provides the same interface as real robots without requiring any simulation dependencies. Unlike `SimRobot` with `backend="mock"`, `MockRobot` can be instantiated directly with custom dimensions.
+
+<Info>
+**When to use MockRobot:**
+- Unit testing robot control code
+- CI/CD pipelines without heavy dependencies  
+- Quick prototyping without config files
+- Testing custom state/action dimensions
+</Info>
+
+## Installation
+
+MockRobot requires only PyTorch - no simulation backends needed:
+
+```bash
+uv pip install torch
+```
+
+It's included in the core `rfx-sdk` package:
+
+```python
+from rfx import MockRobot
+```
+
+## Basic Usage
+
+Create a mock robot with custom dimensions:
+
+```python
+import torch
+from rfx import MockRobot
+
+# Create mock robot with custom dimensions
+robot = MockRobot(
+    state_dim=12,
+    action_dim=6,
+    num_envs=1,
+    max_state_dim=64,
+    max_action_dim=64,
+    device="cpu",
+)
+
+# Use standard robot interface
+obs = robot.observe()
+# Returns: {"state": Tensor(1, 64), "mask": Tensor(1, 64)}
+
+action = torch.randn(1, 64)
+robot.act(action)
+
+obs = robot.reset()
+reward = robot.get_reward()
+done = robot.get_done()
+```
+
+## Parallel Environments
+
+MockRobot supports multiple parallel environments:
+
+```python
+from rfx import MockRobot
+import torch
+
+robot = MockRobot(
+    state_dim=12,
+    action_dim=6,
+    num_envs=16,  # 16 parallel environments
+    device="cpu",
+)
+
+obs = robot.observe()
+print(obs["state"].shape)  # torch.Size([16, 64])
+
+action = torch.randn(16, 64)
+robot.act(action)
+```
+
+## Unit Testing Example
+
+From `rfx/tests/test_robot_v2.py:20-40`:
+
+```python
+import torch
+from rfx import MockRobot
+
+class TestMockRobot:
+    def test_create(self):
+        robot = MockRobot(state_dim=12, action_dim=6, num_envs=16)
+        assert robot.num_envs == 16
+        assert robot.state_dim == 12
+        assert robot.action_dim == 6
+    
+    def test_observe(self):
+        robot = MockRobot(state_dim=12, action_dim=6, num_envs=16)
+        obs = robot.observe()
+        assert obs["state"].shape == (16, 64)
+    
+    def test_act(self):
+        robot = MockRobot(state_dim=12, action_dim=6, num_envs=16)
+        robot.act(torch.randn(16, 64))
+    
+    def test_reset(self):
+        robot = MockRobot(state_dim=12, action_dim=6, num_envs=16)
+        obs = robot.reset()
+        assert obs["state"].shape == (16, 64)
+```
+
+## Physics Model
+
+MockRobot implements a simple spring-damper physics model (from `rfx/python/rfx/sim/mock.py:53-65`):
+
+```python
+def act(self, action: torch.Tensor) -> None:
+    action = action[:, :self.config.action_dim]
+    
+    # PD controller constants
+    k, d = 100.0, 10.0
+    
+    # Compute acceleration
+    error = action - self._positions
+    acceleration = k * error - d * self._velocities
+    
+    # Integrate with timestep
+    self._velocities = self._velocities + acceleration * self._dt
+    self._positions = self._positions + self._velocities * self._dt
+    
+    # Clamp to joint limits
+    self._positions = torch.clamp(self._positions, -3.14159, 3.14159)
+    self._velocities = torch.clamp(self._velocities, -10.0, 10.0)
+```
+
+This provides physically plausible behavior without heavy simulation dependencies.
+
+## Episode Management
+
+MockRobot tracks episode termination:
+
+```python
+from rfx import MockRobot
+import torch
+
+robot = MockRobot(
+    state_dim=12,
+    action_dim=6,
+    num_envs=2,
+    max_steps=1000,  # Episode length
+)
+
+for step in range(2000):
+    action = torch.randn(2, 64)
+    robot.act(action)
+    
+    done = robot.get_done()
+    if done.any():
+        # Reset finished environments
+        env_ids = torch.where(done)[0]
+        robot.reset(env_ids)
+```
+
+## Partial Environment Reset
+
+Reset specific environments without affecting others:
+
+```python
+from rfx import MockRobot
+import torch
+
+robot = MockRobot(state_dim=12, action_dim=6, num_envs=8)
+
+# Reset all environments
+obs = robot.reset()
+
+# Run simulation
+for _ in range(100):
+    robot.act(torch.randn(8, 64))
+
+# Reset only environments 0, 2, 5
+env_ids = torch.tensor([0, 2, 5])
+obs = robot.reset(env_ids)
+```
+
+## Integration with deploy()
+
+Use MockRobot with the `deploy()` function for testing:
+
+```python
+import torch
+import rfx
+from rfx import MockRobot
+
+def random_policy(obs: dict) -> torch.Tensor:
+    batch_size = obs["state"].shape[0]
+    return torch.randn(batch_size, 64)
+
+# Create mock robot
+robot = MockRobot(state_dim=12, action_dim=6)
+
+# Deploy policy
+final_obs, stats = rfx.deploy(
+    robot=robot,
+    policy=random_policy,
+    timesteps=100,
+)
+
+print(f"Completed {stats.steps} steps")
+```
+
+## MockRobot vs SimRobot with Mock Backend
+
+Two ways to use mock simulation:
+
+<Tabs>
+  <Tab title="MockRobot (Direct)">
+    ```python
+    from rfx import MockRobot
+    
+    # Direct instantiation with custom dims
+    robot = MockRobot(
+        state_dim=12,
+        action_dim=6,
+        num_envs=16,
+    )
+    ```
+    
+    **Pros:**
+    - No config file needed
+    - Custom dimensions
+    - Minimal imports
+    
+    **Use for:** Unit tests, quick experiments
+  </Tab>
+  
+  <Tab title="SimRobot (Config-based)">
+    ```python
+    from rfx.sim import SimRobot
+    
+    # Load from config
+    robot = SimRobot.from_config(
+        "rfx/configs/so101.yaml",
+        backend="mock",
+        num_envs=16,
+    )
+    ```
+    
+    **Pros:**
+    - Uses robot configs
+    - Easy backend switching
+    - Production-ready
+    
+    **Use for:** Integration tests, development
+  </Tab>
+</Tabs>
+
+## Testing Without Hardware
+
+MockRobot enables testing control code without hardware access. From `rfx/examples/deploy_real.py:80-101`:
+
+```python
+import argparse
+import torch
+import rfx
+from rfx import MockRobot
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mock", action="store_true", 
+                       help="Use MockRobot (no hardware)")
+    args = parser.parse_args()
+    
+    if args.mock:
+        # MockRobot runs a simple spring-damper physics model
+        # in pure PyTorch — no hardware, no heavy dependencies
+        robot = MockRobot(state_dim=12, action_dim=6)
+    else:
+        # Connect to real hardware
+        robot = rfx.Robot.from_config("rfx/configs/so101.yaml")
+    
+    # Same policy works for both!
+    def policy(obs):
+        return torch.zeros(1, 64)
+    
+    rfx.deploy(robot, policy, timesteps=1000)
+
+if __name__ == "__main__":
+    main()
+```
+
+Run with `--mock` for testing:
+
+```bash
+# Test locally without hardware
+python rfx/examples/deploy_real.py --mock
+
+# Deploy to real robot
+python rfx/examples/deploy_real.py
+```
+
+## CI/CD Integration
+
+MockRobot is perfect for continuous integration:
+
+```yaml
+# .github/workflows/test.yml
+name: Test
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install dependencies
+        run: |
+          uv pip install torch
+          uv pip install -e .
+      
+      - name: Run tests
+        run: |
+          pytest rfx/tests/test_robot_v2.py
+```
+
+No GPU, no simulation backend, no problem!
+
+## Reward and Done Signals
+
+MockRobot provides basic reward and termination signals:
+
+```python
+from rfx import MockRobot
+import torch
+
+robot = MockRobot(
+    state_dim=12,
+    action_dim=6,
+    max_steps=1000,
+)
+
+robot.reset()
+for step in range(1500):
+    action = torch.randn(1, 64)
+    robot.act(action)
+    
+    reward = robot.get_reward()  # Negative error norm
+    done = robot.get_done()      # True after max_steps
+    
+    if done.item():
+        print(f"Episode finished at step {step}")
+        robot.reset()
+```
+
+Reward is computed as negative position error:
+
+```python
+# From mock.py:64
+self._reward = -torch.norm(error, dim=-1)
+```
+
+## Multi-Robot Testing
+
+Test heterogeneous robot systems:
+
+```python
+import torch
+from rfx import MockRobot
+
+# SO-101 robot (6-DOF arm)
+so101 = MockRobot(state_dim=12, action_dim=6, num_envs=8)
+
+# Go2 robot (12-DOF quadruped)
+go2 = MockRobot(state_dim=24, action_dim=12, num_envs=8)
+
+# Control both in parallel
+so101_obs = so101.observe()
+go2_obs = go2.observe()
+
+so101.act(torch.randn(8, 64))
+go2.act(torch.randn(8, 64))
+```
+
+## Custom Configuration
+
+All MockRobot parameters:
+
+```python
+from rfx import MockRobot
+
+robot = MockRobot(
+    state_dim=12,           # Active state dimension
+    action_dim=6,           # Active action dimension
+    num_envs=16,            # Number of parallel environments
+    max_state_dim=64,       # Padded state dimension
+    max_action_dim=64,      # Padded action dimension
+    device="cpu",           # Device placement ("cpu" or "cuda")
+    max_steps=1000,         # Episode length before done=True
+)
+```
+
+## Common Patterns
+
+<AccordionGroup>
+  <Accordion title="Test with MockRobot, deploy with real hardware">
+    ```python
+    def create_robot(mock: bool):
+        if mock:
+            return MockRobot(state_dim=12, action_dim=6)
+        else:
+            return rfx.Robot.from_config("rfx/configs/so101.yaml")
+    
+    # Test locally
+    robot = create_robot(mock=True)
+    # Deploy to hardware
+    robot = create_robot(mock=False)
+    ```
+  </Accordion>
+  
+  <Accordion title="Validate policy shape compatibility">
+    ```python
+    from rfx import MockRobot
+    import torch
+    
+    def test_policy_shapes():
+        robot = MockRobot(state_dim=12, action_dim=6)
+        obs = robot.observe()
+        
+        action = my_policy(obs)
+        assert action.shape == (1, 64), "Policy must output (batch, 64)"
+        
+        robot.act(action)  # Should not raise
+    ```
+  </Accordion>
+  
+  <Accordion title="Benchmark control loop latency">
+    ```python
+    from rfx import MockRobot
+    import torch
+    import time
+    
+    robot = MockRobot(state_dim=12, action_dim=6)
+    
+    start = time.time()
+    for _ in range(1000):
+        obs = robot.observe()
+        action = policy(obs)
+        robot.act(action)
+    
+    elapsed = time.time() - start
+    print(f"Control Hz: {1000/elapsed:.1f}")
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## API Reference
+
+### Constructor
+
+```python
+MockRobot(
+    state_dim: int = 12,
+    action_dim: int = 6,
+    num_envs: int = 1,
+    max_state_dim: int = 64,
+    max_action_dim: int = 64,
+    device: str = "cpu",
+    **kwargs,
+)
+```
+
+### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `observe()` | `dict[str, Tensor]` | Get current state observation |
+| `act(action)` | `None` | Apply action and step physics |
+| `reset(env_ids=None)` | `dict[str, Tensor]` | Reset environments and return obs |
+| `get_reward()` | `Tensor` | Get current reward signal |
+| `get_done()` | `Tensor` | Get episode termination flags |
+
+### Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `num_envs` | `int` | Number of parallel environments |
+| `state_dim` | `int` | Active state dimension |
+| `action_dim` | `int` | Active action dimension |
+| `max_state_dim` | `int` | Padded state dimension |
+| `max_action_dim` | `int` | Padded action dimension |
+| `device` | `str` | Device placement ("cpu" or "cuda") |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Simulation Overview" icon="robot" href="/simulation/overview">
+    Learn about full simulation backends
+  </Card>
+  <Card title="Backend Details" icon="gears" href="/simulation/backends">
+    Compare Genesis, MuJoCo MJX, and Mock
+  </Card>
+</CardGroup>

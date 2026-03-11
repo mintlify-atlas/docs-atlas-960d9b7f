@@ -1,0 +1,245 @@
+---
+title: "rfx.sim"
+description: "Simulation backends for parallel training"
+---
+
+# rfx.sim
+
+Simulation backends for parallel training with support for Genesis (GPU), MuJoCo MJX (JAX), and Mock (CPU testing).
+
+## SimRobot
+
+Simulated robot with parallel environments.
+
+```python
+from rfx.sim import SimRobot
+
+robot = SimRobot.from_config("so101.yaml", num_envs=4096, backend="genesis")
+obs = robot.observe()       # (4096, 64)
+robot.act(action)           # Step all 4096 envs
+```
+
+### Constructor
+
+```python
+SimRobot(
+    config: str | Path | RobotConfig | dict,
+    num_envs: int = 1,
+    backend: str = "mock",
+    device: str = "cuda",
+    **kwargs
+)
+```
+
+<ParamField path="config" type="str | Path | RobotConfig | dict" required>
+  Robot configuration. Can be a path to a YAML file, a RobotConfig object, or a dictionary.
+</ParamField>
+
+<ParamField path="num_envs" type="int" default="1">
+  Number of parallel environments to simulate.
+</ParamField>
+
+<ParamField path="backend" type="str" default="mock">
+  Simulation backend to use. Options: `"genesis"`, `"mjx"`, `"mock"`.
+</ParamField>
+
+<ParamField path="device" type="str" default="cuda">
+  Device to run simulation on (`"cuda"` or `"cpu"`).
+</ParamField>
+
+<ParamField path="**kwargs" type="dict">
+  Additional backend-specific arguments.
+</ParamField>
+
+### Methods
+
+#### from_config
+
+```python
+@classmethod
+SimRobot.from_config(
+    config_path: str | Path,
+    num_envs: int = 1,
+    backend: str = "mock",
+    device: str | None = None,
+    **kwargs
+) -> SimRobot
+```
+
+Create a SimRobot from a configuration file.
+
+<ParamField path="config_path" type="str | Path" required>
+  Path to robot configuration YAML file.
+</ParamField>
+
+<ParamField path="num_envs" type="int" default="1">
+  Number of parallel environments.
+</ParamField>
+
+<ParamField path="backend" type="str" default="mock">
+  Simulation backend to use.
+</ParamField>
+
+<ParamField path="device" type="str | None" default="None">
+  Device to use. If None, automatically selects CUDA if available, otherwise CPU.
+</ParamField>
+
+<ResponseField name="return" type="SimRobot">
+  Initialized SimRobot instance.
+</ResponseField>
+
+#### observe
+
+```python
+robot.observe() -> dict[str, torch.Tensor]
+```
+
+Get current observations from all environments.
+
+<ResponseField name="return" type="dict[str, torch.Tensor]">
+  Dictionary containing observation tensors with keys like `"state"`, `"images"`, etc.
+</ResponseField>
+
+#### act
+
+```python
+robot.act(action: torch.Tensor) -> None
+```
+
+Apply actions to all environments and step the simulation.
+
+<ParamField path="action" type="torch.Tensor" required>
+  Action tensor of shape `(num_envs, action_dim)`.
+</ParamField>
+
+#### reset
+
+```python
+robot.reset(env_ids: torch.Tensor | None = None) -> dict[str, torch.Tensor]
+```
+
+Reset specified environments (or all if env_ids is None).
+
+<ParamField path="env_ids" type="torch.Tensor | None" default="None">
+  Indices of environments to reset. If None, resets all environments.
+</ParamField>
+
+<ResponseField name="return" type="dict[str, torch.Tensor]">
+  Initial observations after reset.
+</ResponseField>
+
+#### get_reward
+
+```python
+robot.get_reward() -> torch.Tensor
+```
+
+Get rewards for all environments.
+
+<ResponseField name="return" type="torch.Tensor">
+  Reward tensor of shape `(num_envs,)`.
+</ResponseField>
+
+#### get_done
+
+```python
+robot.get_done() -> torch.Tensor
+```
+
+Get done flags for all environments.
+
+<ResponseField name="return" type="torch.Tensor">
+  Boolean tensor of shape `(num_envs,)` indicating which environments are done.
+</ResponseField>
+
+#### render
+
+```python
+robot.render() -> None
+```
+
+Render the simulation (backend-dependent).
+
+#### close
+
+```python
+robot.close() -> None
+```
+
+Clean up simulation resources.
+
+### Properties
+
+<ResponseField name="backend" type="str">
+  Name of the simulation backend being used.
+</ResponseField>
+
+<ResponseField name="config" type="RobotConfig">
+  Robot configuration object.
+</ResponseField>
+
+---
+
+## MockRobot
+
+Mock robot for testing without real simulation dependencies.
+
+```python
+from rfx.sim import MockRobot
+
+robot = MockRobot(state_dim=12, action_dim=6, num_envs=8)
+obs = robot.observe()
+robot.act(torch.zeros(8, 6))
+```
+
+### Constructor
+
+```python
+MockRobot(
+    state_dim: int = 12,
+    action_dim: int = 6,
+    num_envs: int = 1,
+    max_state_dim: int = 64,
+    max_action_dim: int = 64,
+    device: str = "cpu",
+    **kwargs
+)
+```
+
+<ParamField path="state_dim" type="int" default="12">
+  Dimension of the state space.
+</ParamField>
+
+<ParamField path="action_dim" type="int" default="6">
+  Dimension of the action space.
+</ParamField>
+
+<ParamField path="num_envs" type="int" default="1">
+  Number of parallel environments.
+</ParamField>
+
+<ParamField path="max_state_dim" type="int" default="64">
+  Maximum state dimension for padding.
+</ParamField>
+
+<ParamField path="max_action_dim" type="int" default="64">
+  Maximum action dimension for padding.
+</ParamField>
+
+<ParamField path="device" type="str" default="cpu">
+  Device to run on.
+</ParamField>
+
+<ParamField path="**kwargs" type="dict">
+  Additional configuration options (e.g., `max_steps`).
+</ParamField>
+
+### Methods
+
+MockRobot implements the same interface as SimRobot:
+
+- `observe() -> dict[str, torch.Tensor]`
+- `act(action: torch.Tensor) -> None`
+- `reset(env_ids: torch.Tensor | None = None) -> dict[str, torch.Tensor]`
+- `get_reward() -> torch.Tensor`
+- `get_done() -> torch.Tensor`

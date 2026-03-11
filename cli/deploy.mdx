@@ -1,0 +1,337 @@
+---
+title: rfx deploy
+description: Deploy trained policies to robot hardware with automatic loading and control loop management
+---
+
+`rfx deploy` loads a trained policy and runs it on robot hardware. This is the main deployment command — train your policy, then deploy it.
+
+## Basic Usage
+
+```bash
+rfx deploy runs/my-policy --robot so101
+```
+
+This command:
+
+1. Loads the policy weights and configuration
+2. Resolves the robot configuration
+3. Connects to hardware
+4. Runs the control loop with rate control and jitter tracking
+5. Handles clean shutdown on Ctrl+C
+
+## Arguments
+
+### Required
+
+<ParamField path="policy" type="string" required>
+  Path to the policy. Can be:
+  - Local directory: `runs/my-policy`
+  - HuggingFace Hub: `hf://org/repo` or `hf://user/model`
+  - Python file with `@rfx.policy` decorator: `my_policy.py`
+  
+  ```bash
+  rfx deploy runs/my-policy --robot so101
+  rfx deploy hf://rfx-community/go2-walk-v1 --robot go2
+  rfx deploy my_policy.py --robot so101
+  ```
+</ParamField>
+
+### Optional
+
+<ParamField path="--robot" type="string" default="None">
+  Robot type: `so101`, `go2`, `g1`, or path to a YAML config file.
+  
+  If the policy was saved with `robot_config`, this is auto-detected and can be omitted.
+  
+  ```bash
+  rfx deploy runs/my-policy --robot so101
+  rfx deploy runs/my-policy --robot configs/custom-arm.yaml
+  ```
+</ParamField>
+
+<ParamField path="--config" type="string" default="None">
+  Path to robot YAML config file. Overrides `--robot` if both are provided.
+  
+  ```bash
+  rfx deploy runs/my-policy --config configs/so101-custom.yaml
+  ```
+</ParamField>
+
+<ParamField path="--port" type="string" default="None">
+  Serial port or IP address override. Use when auto-detection fails or you want to specify a device explicitly.
+  
+  ```bash
+  # Serial port for SO-101
+  rfx deploy runs/my-policy --robot so101 --port /dev/ttyACM0
+  
+  # IP address for Unitree Go2
+  rfx deploy runs/my-policy --robot go2 --port 192.168.1.120
+  ```
+</ParamField>
+
+<ParamField path="--rate-hz" type="float" default="None">
+  Control loop frequency in Hz. Defaults to the robot's configured rate.
+  
+  ```bash
+  rfx deploy runs/my-policy --robot so101 --rate-hz 50
+  ```
+</ParamField>
+
+<ParamField path="--duration" type="float" default="None">
+  Run time in seconds. If not specified, runs indefinitely until Ctrl+C.
+  
+  ```bash
+  rfx deploy runs/my-policy --robot go2 --duration 60
+  ```
+</ParamField>
+
+<ParamField path="--mock" type="boolean" default="false">
+  Use MockRobot instead of real hardware. Useful for testing policies without a physical robot.
+  
+  ```bash
+  rfx deploy runs/my-policy --mock
+  ```
+</ParamField>
+
+<ParamField path="--warmup" type="float" default="0.5">
+  Warmup sleep duration in seconds after robot reset, before starting the control loop.
+  
+  ```bash
+  rfx deploy runs/my-policy --robot so101 --warmup 1.0
+  ```
+</ParamField>
+
+## Deployment Modes
+
+### From Local Checkpoint
+
+Deploy a policy saved to disk:
+
+```bash
+rfx deploy runs/my-policy --robot so101
+```
+
+The policy directory should contain:
+```
+runs/my-policy/
+├── rfx_config.json       # architecture + robot + metadata
+├── model.safetensors     # weights
+└── normalizer.json       # observation normalizer (optional)
+```
+
+### From HuggingFace Hub
+
+Deploy a policy directly from the Hub:
+
+```bash
+rfx deploy hf://rfx-community/go2-walk-v1 --robot go2
+rfx deploy hf://my-org/pick-policy --robot so101 --duration 30
+```
+
+rfx automatically downloads and caches the policy.
+
+### From Python File
+
+Deploy a policy defined in a Python file with the `@rfx.policy` decorator:
+
+```python
+# my_policy.py
+import torch
+import rfx
+
+@rfx.policy
+def hold_position(obs):
+    """Policy that holds the robot still."""
+    return torch.zeros(1, 64)
+```
+
+```bash
+rfx deploy my_policy.py --robot so101
+```
+
+### Mock Deployment (No Hardware)
+
+Test a policy without physical hardware:
+
+```bash
+rfx deploy runs/my-policy --mock
+```
+
+Uses `MockRobot` which simulates observations and actions.
+
+## Examples
+
+### Deploy SO-101 policy for 60 seconds
+
+```bash
+rfx deploy runs/pick-policy --robot so101 --duration 60
+```
+
+### Deploy Go2 policy from HuggingFace Hub
+
+```bash
+rfx deploy hf://rfx-community/go2-walk-v1 --robot go2
+```
+
+### Deploy with custom control rate
+
+```bash
+rfx deploy runs/my-policy --robot so101 --rate-hz 100
+```
+
+### Deploy to specific serial port
+
+```bash
+rfx deploy runs/my-policy --robot so101 --port /dev/ttyUSB0
+```
+
+### Deploy with custom robot config
+
+```bash
+rfx deploy runs/my-policy --config configs/custom-so101.yaml
+```
+
+### Test policy without hardware
+
+```bash
+rfx deploy runs/my-policy --robot so101 --mock
+```
+
+### Deploy with longer warmup period
+
+```bash
+rfx deploy runs/my-policy --robot so101 --warmup 2.0
+```
+
+## What Deploy Does
+
+`rfx deploy` handles the complete deployment pipeline:
+
+1. **Load Policy**
+   - Parse policy source (local path, Hub URL, or Python file)
+   - Load weights from `model.safetensors` or checkpoint
+   - Load metadata from `rfx_config.json`
+   - Initialize normalizer if present
+
+2. **Resolve Robot Configuration**
+   - Use `--robot` flag or auto-detect from policy config
+   - Load robot YAML configuration
+   - Validate action/observation dimensions
+
+3. **Connect to Hardware**
+   - Discover serial ports or network devices
+   - Initialize robot driver (Rust for SO-101, Zenoh for Go2/G1)
+   - Run reset sequence
+   - Wait for warmup period
+
+4. **Run Control Loop**
+   - Observe robot state
+   - Run policy inference
+   - Send action commands
+   - Track loop timing and jitter
+   - Handle rate limiting
+
+5. **Clean Shutdown**
+   - Catch Ctrl+C gracefully
+   - Stop robot safely
+   - Close connections
+   - Print statistics
+
+## Control Loop Details
+
+The control loop runs at the specified rate (default from robot config):
+
+```python
+while running:
+    obs = robot.observe()       # Get current state
+    action = policy(obs)        # Compute action
+    robot.act(action)           # Send command
+    rate_limiter.sleep()        # Maintain frequency
+```
+
+rfx tracks:
+- Loop jitter (deviation from target rate)
+- Average inference time
+- Total steps executed
+
+## Stopping Deployment
+
+Press **Ctrl+C** to stop gracefully:
+
+```
+^C
+[rfx] Stopping...
+[rfx] Deployed for 45.2s, 2260 steps
+[rfx] Average inference: 3.2ms, jitter: 0.8ms
+```
+
+## Error Handling
+
+`rfx deploy` handles common errors:
+
+### Policy not found
+
+```
+[rfx] Error: Policy not found at runs/my-policy
+```
+
+Check the path or ensure the policy exists.
+
+### Robot not detected
+
+```
+[rfx] Error: Robot 'so101' not found
+```
+
+Run `rfx doctor` to check hardware detection.
+
+### Dimension mismatch
+
+```
+[rfx] Error: Action dimension mismatch: policy outputs 12, robot expects 6
+```
+
+Ensure the policy was trained for the correct robot configuration.
+
+## Python API
+
+You can also deploy from Python:
+
+```python
+import rfx
+
+# Deploy from local checkpoint
+stats = rfx.deploy("runs/my-policy", robot="so101")
+
+# Deploy from HuggingFace Hub
+stats = rfx.deploy("hf://user/policy", robot="go2", duration=30)
+
+# Deploy with options
+stats = rfx.deploy(
+    "runs/my-policy",
+    robot="so101",
+    rate_hz=50,
+    duration=60,
+    mock=False,
+    warmup_s=1.0,
+)
+```
+
+## Deployment Best Practices
+
+1. **Test with `--mock` first**: Validate the policy loads correctly before connecting hardware.
+
+2. **Use `--duration` for initial tests**: Set a short duration (e.g., 10-30s) when testing new policies.
+
+3. **Monitor the first few runs**: Watch for unexpected behavior, jitter warnings, or errors.
+
+4. **Keep emergency stop accessible**: Always have a way to quickly stop the robot.
+
+5. **Start with low duration**: Gradually increase deployment time as confidence grows.
+
+## See Also
+
+- [Record command](/cli/record) - Collect demonstration data
+- [Doctor command](/cli/doctor) - Check environment setup
+- [Policy API](/api/decorators) - Writing and saving policies
+- [Robot API](/api/robot) - Robot configuration and interface

@@ -1,0 +1,203 @@
+---
+title: "rfx.decorators"
+description: "@policy decorator and MotorCommands for deployable policies"
+---
+
+The `rfx.decorators` module provides the `@policy` decorator for marking functions as deployable and `MotorCommands` for building actions from named joints.
+
+```python
+import rfx
+
+@rfx.policy
+def hold(obs):
+    return rfx.MotorCommands({"gripper": 0.8}, config=rfx.SO101_CONFIG).to_tensor()
+
+# Then:
+#   rfx deploy my_policy.py --robot so101
+```
+
+## Decorator
+
+### @policy
+
+Mark a function as an rfx policy for deployment with `rfx deploy`.
+
+A policy is any callable: `Dict[str, Tensor] -> Tensor`. This decorator stamps `_rfx_policy = True` so that `rfx deploy my_file.py` can discover it automatically.
+
+```python
+import rfx
+import torch
+
+@rfx.policy
+def my_policy(obs):
+    return model(obs["state"])
+
+# Or with parentheses
+@rfx.policy()
+def my_policy(obs):
+    return model(obs["state"])
+```
+
+<ParamField path="fn" type="Callable | None">
+  The function to decorate (when used without parentheses).
+</ParamField>
+
+**Returns:** `Callable` - The decorated function, unchanged except for the `_rfx_policy` marker.
+
+---
+
+## Classes
+
+### MotorCommands
+
+Build action tensors from named joint positions.
+
+Instead of writing `action[0, 5] = 0.8` and hoping index 5 is the gripper, use joint names from the robot config:
+
+```python
+from rfx import MotorCommands, SO101_CONFIG
+
+cmd = MotorCommands(
+    {"gripper": 0.8, "elbow": -0.3},
+    config=SO101_CONFIG
+)
+action = cmd.to_tensor()  # shape: (1, max_action_dim)
+```
+
+Works with any robot — resolves joint names from the config's joint list.
+
+<ParamField path="positions" type="dict[str, float] | None">
+  Dict mapping joint name to target position.
+</ParamField>
+
+<ParamField path="config" type="RobotConfig | None">
+  RobotConfig with joints list. Required for `to_tensor()`.
+</ParamField>
+
+<ParamField path="kp" type="float" default="20.0">
+  Position gain (for backends that use it).
+</ParamField>
+
+<ParamField path="kd" type="float" default="0.5">
+  Damping gain (for backends that use it).
+</ParamField>
+
+#### Methods
+
+**`to_tensor(batch_size=1)`**
+
+Convert named positions to a padded action tensor.
+
+Returns a tensor of shape `(batch_size, max_action_dim)` with joint positions placed at the correct indices from the robot config.
+
+```python
+cmd = MotorCommands({"gripper": 0.8}, config=SO101_CONFIG)
+action = cmd.to_tensor(batch_size=1)  # (1, max_action_dim)
+```
+
+<ParamField path="batch_size" type="int" default="1">
+  Leading batch dimension.
+</ParamField>
+
+**Returns:** `torch.Tensor` - Action tensor ready to pass to `robot.act()`.
+
+**Raises:** `ValueError` - If config is not set or a joint name is not found.
+
+---
+
+**`to_list()`**
+
+Convert to a flat position list using config joint ordering.
+
+Returns a list of length `action_dim` with positions at the correct indices. Joints not specified default to 0.0.
+
+```python
+cmd = MotorCommands({"gripper": 0.8}, config=SO101_CONFIG)
+positions = cmd.to_list()  # [0.0, 0.0, ..., 0.8, ...]
+```
+
+**Returns:** `list[float]` - Flat position list.
+
+**Raises:** `ValueError` - If config is not set.
+
+---
+
+**`MotorCommands.from_positions(positions, config=None, kp=20.0, kd=0.5)` (classmethod)**
+
+Create commands from named positions.
+
+```python
+cmd = MotorCommands.from_positions(
+    {"gripper": 0.8, "elbow": -0.3},
+    config=SO101_CONFIG,
+    kp=30.0
+)
+```
+
+<ParamField path="positions" type="dict[str, float]" required>
+  Dict mapping joint name to target position.
+</ParamField>
+
+<ParamField path="config" type="RobotConfig | None">
+  RobotConfig with joints list.
+</ParamField>
+
+<ParamField path="kp" type="float" default="20.0">
+  Position gain.
+</ParamField>
+
+<ParamField path="kd" type="float" default="0.5">
+  Damping gain.
+</ParamField>
+
+**Returns:** `MotorCommands` - New MotorCommands instance.
+
+---
+
+## Example: Complete Deployable Policy
+
+```python
+# my_walking_policy.py
+import rfx
+import torch
+
+# Load a trained model
+loaded = rfx.load_policy("hf://rfx-community/go2-walk-v1")
+
+@rfx.policy
+def walk(obs):
+    """Walk forward at constant velocity."""
+    # Use the loaded policy
+    return loaded(obs)
+
+# Deploy with:
+#   rfx deploy my_walking_policy.py --robot go2
+```
+
+```python
+# my_manual_control.py
+import rfx
+from rfx import MotorCommands, GO2_CONFIG
+
+@rfx.policy
+def stand(obs):
+    """Hold standing pose."""
+    positions = {
+        "FL_hip": 0.0,
+        "FL_thigh": 0.9,
+        "FL_calf": -1.8,
+        "FR_hip": 0.0,
+        "FR_thigh": 0.9,
+        "FR_calf": -1.8,
+        "RL_hip": 0.0,
+        "RL_thigh": 0.9,
+        "RL_calf": -1.8,
+        "RR_hip": 0.0,
+        "RR_thigh": 0.9,
+        "RR_calf": -1.8,
+    }
+    return MotorCommands(positions, config=GO2_CONFIG).to_tensor()
+
+# Deploy with:
+#   rfx deploy my_manual_control.py --robot go2
+```

@@ -1,0 +1,244 @@
+---
+title: Collect Demonstrations
+description: Record teleoperation demos into LeRobot datasets
+---
+
+The simplest path from hardware to HuggingFace Hub. rfx provides both a CLI command and Python API for collecting demonstrations from your robot.
+
+## Quick Start
+
+<Steps>
+  <Step title="Install rfx">
+    ```bash
+    uv pip install rfx-sdk
+    ```
+  </Step>
+
+  <Step title="Record demos">
+    ```bash
+    rfx record --robot so101 --repo-id my-org/demos --episodes 10
+    ```
+  </Step>
+
+  <Step title="Push to Hub">
+    The dataset is automatically pushed to HuggingFace Hub when using the `--push` flag:
+    ```bash
+    rfx record --robot so101 --repo-id my-org/demos --episodes 10 --push
+    ```
+  </Step>
+</Steps>
+
+## Python API
+
+The `rfx.collection.collect()` function provides programmatic access to data collection:
+
+```python
+import rfx.collection
+
+# Collect 10 episodes from SO-101 arm
+dataset = rfx.collection.collect(
+    "so101",
+    "my-org/demos",
+    episodes=10
+)
+
+# Push to HuggingFace Hub
+dataset.push()
+```
+
+### Advanced Collection
+
+Control timing, cameras, and output format:
+
+```python
+import rfx.collection
+
+dataset = rfx.collection.collect(
+    robot_type="so101",
+    repo_id="my-org/pick-place-demos",
+    output="datasets",           # Local output directory
+    episodes=50,                  # Number of episodes to collect
+    duration_s=30.0,              # Duration per episode (seconds)
+    task="pick-place",            # Task label for episodes
+    fps=30,                       # Frame rate
+    state_dim=6,                  # State dimensionality
+    camera_names=["cam0", "cam1"],  # Camera identifiers
+    push_to_hub=True,             # Auto-push to Hub
+    mcap=True                     # Also export MCAP format
+)
+
+print(f"Collected {dataset.num_episodes} episodes")
+```
+
+<Note>
+Press **Ctrl+C** to end an episode early when not using `duration_s`.
+</Note>
+
+## Using the Recorder API
+
+For fine-grained control, use the `Recorder` class directly:
+
+```python
+from rfx.collection import Recorder
+import numpy as np
+
+# Create recorder
+recorder = Recorder.create(
+    "my-org/demos",
+    root="datasets",
+    fps=30,
+    robot_type="so101",
+    state_dim=6,
+    camera_names=["cam0", "cam1"],
+)
+
+# Record an episode
+recorder.start_episode(task="pick-place")
+
+for _ in range(300):  # 10 seconds at 30 fps
+    # Get current state from your robot
+    state = robot.observe()["state"].numpy()
+    action = state  # For teleoperation, action = state
+    
+    # Optionally capture images
+    images = {
+        "cam0": camera0.read(),
+        "cam1": camera1.read(),
+    }
+    
+    recorder.add_frame(
+        state=state,
+        action=action,
+        images=images
+    )
+
+recorder.save_episode()
+recorder.push()  # Upload to HuggingFace Hub
+```
+
+## Recording from Teleoperation
+
+For leader-follower setups like bimanual SO-101:
+
+```python
+from rfx.teleop import (
+    BimanualSo101Session,
+    TeleopSessionConfig,
+    ArmPairConfig,
+    CameraStreamConfig,
+)
+
+# Configure bimanual teleoperation
+config = TeleopSessionConfig(
+    rate_hz=350.0,
+    output_dir="demos",
+    arm_pairs=(
+        ArmPairConfig(
+            name="left",
+            leader_port="/dev/ttyACM0",
+            follower_port="/dev/ttyACM1",
+        ),
+        ArmPairConfig(
+            name="right",
+            leader_port="/dev/ttyACM2",
+            follower_port="/dev/ttyACM3",
+        ),
+    ),
+    cameras=(
+        CameraStreamConfig(name="cam0", device_id=0, fps=30),
+        CameraStreamConfig(name="cam1", device_id=1, fps=30),
+    ),
+)
+
+session = BimanualSo101Session(config=config)
+session.start()
+
+# Start recording
+episode_id = session.start_recording(label="pick-place")
+print(f"Recording: {episode_id}")
+
+# ... perform teleoperation ...
+
+# Stop and save
+result = session.stop_recording()
+print(f"Saved: {result.episode_id} → {result.manifest_path}")
+
+# Export to LeRobot format
+summary = session.recorder.export_episode_to_lerobot(
+    result,
+    repo_id="my-org/bimanual-demos",
+    root="lerobot_datasets",
+    fps=30,
+    task="pick-place",
+)
+print(f"Exported {summary['frames_added']} frames to {summary['repo_id']}")
+
+session.stop()
+```
+
+## Data Formats
+
+### LeRobot Dataset
+
+The default format is [LeRobot](https://github.com/huggingface/lerobot)-compatible, with:
+
+- `observation.state`: Joint positions/velocities (float32)
+- `action`: Target joint positions (float32)
+- `observation.images.<camera_name>`: Video frames (uint8)
+- Episode metadata and task labels
+
+### MCAP Export
+
+Optionally export to MCAP for use with Foxglove and other robotics tools:
+
+```python
+dataset = rfx.collection.collect(
+    "so101",
+    "my-org/demos",
+    episodes=10,
+    mcap=True  # Enable MCAP export
+)
+```
+
+## Opening Existing Datasets
+
+Load a local dataset for inspection or additional processing:
+
+```python
+from rfx.collection import open_dataset
+
+dataset = open_dataset("my-org/demos", root="datasets")
+print(f"Episodes: {dataset.num_episodes}")
+print(f"Total frames: {dataset.num_frames}")
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Episode Length">
+    Keep episodes focused on a single task attempt (5-30 seconds). Multiple short episodes are better than one long episode with multiple tasks.
+  </Accordion>
+
+  <Accordion title="Camera Placement">
+    Use multiple camera angles (wrist-mounted, third-person, overhead) for better visual coverage. Ensure consistent lighting across episodes.
+  </Accordion>
+
+  <Accordion title="Demonstration Quality">
+    Record smooth, deliberate movements. Avoid jerky motions or hesitations that the policy might learn to imitate.
+  </Accordion>
+
+  <Accordion title="Dataset Size">
+    Start with 50-100 episodes for initial training. Scale to 500+ for production-quality policies.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Train Policy" icon="brain" href="/workflows/train-policy">
+    Use your collected demos to train a policy with LeRobot
+  </Card>
+  <Card title="Hub Integration" icon="cloud" href="/workflows/hub-integration">
+    Push and pull datasets from HuggingFace Hub
+  </Card>
+</CardGroup>

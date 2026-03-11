@@ -1,0 +1,375 @@
+---
+title: Unitree Go2 Quadruped
+description: Guide to using the Unitree Go2 with rfx and Zenoh transport
+---
+
+## Overview
+
+The **Unitree Go2** is a quadruped robot with 12 actuated joints (3 per leg). rfx supports both **sport mode** (velocity control) and **EDU mode** (low-level joint control) via the Zenoh transport pipeline.
+
+- **Control frequency**: 200 Hz
+- **Interface**: Ethernet (Zenoh transport)
+- **State**: 34-dim (12 pos + 12 vel + 4 quat + 3 gyro + 3 acc)
+- **Actions**: 12-dim (joint positions) or 3-dim (vx, vy, vyaw in sport mode)
+
+## Quick Start
+
+### Basic Usage
+
+```python
+from rfx import RealRobot
+
+# Default IP address (192.168.123.161)
+robot = RealRobot.from_config("go2.yaml")
+
+# Custom IP
+robot = RealRobot.from_config(
+    "go2.yaml",
+    ip_address="192.168.123.161"
+)
+
+# EDU mode (low-level joint control)
+robot = RealRobot.from_config(
+    "go2.yaml",
+    edu_mode=True
+)
+
+obs = robot.observe()
+robot.act(action)
+robot.disconnect()
+```
+
+### Convenience Factory
+
+```python
+from rfx.real import Go2Robot
+
+# Auto-detect with Rust/Zenoh backend
+go2 = Go2Robot()
+
+# Multi-machine setup with explicit Zenoh router
+go2 = Go2Robot(zenoh_endpoint="tcp/192.168.123.161:7447")
+
+# EDU mode for low-level motor control
+go2 = Go2Robot(edu_mode=True)
+```
+
+## Observation Structure
+
+The Go2 provides rich proprioceptive feedback:
+
+```python
+obs = robot.observe()
+# {
+#   "state": Tensor(1, 64),  # padded from 34-dim
+# }
+
+# State layout (before padding):
+# [0:12]   - joint positions (FR_hip, FR_thigh, FR_calf, FL_*, RR_*, RL_*)
+# [12:24]  - joint velocities
+# [24:28]  - base orientation (quaternion: w, x, y, z)
+# [28:31]  - angular velocity (gyroscope)
+# [31:34]  - linear acceleration (accelerometer)
+```
+
+### Joint Indices
+
+| Joint | Index | Description |
+|-------|-------|-------------|
+| `FR_hip` | 0 | Front-right hip |
+| `FR_thigh` | 1 | Front-right thigh |
+| `FR_calf` | 2 | Front-right calf |
+| `FL_hip` | 3 | Front-left hip |
+| `FL_thigh` | 4 | Front-left thigh |
+| `FL_calf` | 5 | Front-left calf |
+| `RR_hip` | 6 | Rear-right hip |
+| `RR_thigh` | 7 | Rear-right thigh |
+| `RR_calf` | 8 | Rear-right calf |
+| `RL_hip` | 9 | Rear-left hip |
+| `RL_thigh` | 10 | Rear-left thigh |
+| `RL_calf` | 11 | Rear-left calf |
+
+## Control Modes
+
+### Sport Mode (Default)
+
+High-level velocity commands for walking:
+
+```python
+import torch
+
+robot = RealRobot.from_config("go2.yaml", edu_mode=False)
+
+# Action: [vx, vy, vyaw, 0, 0, ...] (padded to 64 dims)
+action = torch.zeros(1, 64)
+action[0, 0] = 0.3   # forward velocity (m/s)
+action[0, 1] = 0.0   # lateral velocity (m/s)
+action[0, 2] = 0.0   # yaw rate (rad/s)
+
+robot.act(action)
+```
+
+Convenience methods:
+
+```python
+from rfx.real.go2 import Go2Backend
+
+backend = Go2Backend(config=GO2_CONFIG)
+backend.stand()                    # recovery stand
+backend.sit()                      # sit down
+backend.walk(vx=0.3, vy=0.0, vyaw=0.0)  # walk forward
+```
+
+### EDU Mode (Low-Level Joint Control)
+
+Direct joint position commands:
+
+```python
+import torch
+
+robot = RealRobot.from_config("go2.yaml", edu_mode=True)
+
+# Action: 12 joint positions (padded to 64 dims)
+action = torch.zeros(1, 64)
+action[0, :12] = torch.tensor([...])  # target joint positions
+
+robot.act(action)
+```
+
+<Warning>
+EDU mode requires a Unitree Go2 EDU license and bypasses the built-in balance controller. Use with caution.
+</Warning>
+
+## Backend Selection
+
+rfx supports multiple communication backends for the Go2:
+
+### Rust/Zenoh (Recommended)
+
+The default backend uses a Rust `RobotNode` with Zenoh transport:
+
+```python
+robot = RealRobot.from_config(
+    "go2.yaml",
+    hw_backend="rust"  # explicit (default is "auto")
+)
+```
+
+- **Pros**: Clean architecture, language-agnostic transport, multi-machine support
+- **Cons**: Requires `maturin develop` to build Rust bindings
+
+### Legacy unitree_sdk2py
+
+Fallback to the official Unitree SDK (Python bindings):
+
+```python
+robot = RealRobot.from_config(
+    "go2.yaml",
+    hw_backend="unitree"  # or "unitree_sdk2py"
+)
+```
+
+- **Pros**: No build step, official SDK
+- **Cons**: Only works on-robot, requires system Python at `/usr/bin/python3`
+
+### Auto-Detection
+
+```python
+robot = RealRobot.from_config("go2.yaml", hw_backend="auto")
+```
+
+Tries backends in order: `rust` → `unitree_sdk2py` → `subprocess`.
+
+Set the environment variable to override:
+
+```bash
+export RFX_GO2_BACKEND=rust  # force Zenoh transport
+```
+
+## Multi-Machine Setup
+
+For off-robot control, specify a Zenoh router endpoint:
+
+```python
+robot = RealRobot.from_config(
+    "go2.yaml",
+    zenoh_endpoint="tcp/192.168.123.161:7447"
+)
+```
+
+Ensure the Zenoh router is running on the robot:
+
+```bash
+# On the robot
+zenohd --cfg 'listen: ["tcp/0.0.0.0:7447"]'
+```
+
+## Deploy a Policy
+
+Deploy a trained policy to the Go2:
+
+```bash
+# From a local checkpoint
+rfx deploy runs/go2-walk-v1 --robot go2
+
+# From HuggingFace Hub
+rfx deploy hf://rfx-community/go2-walk-v1 --robot go2 --duration 60
+
+# Test without hardware
+rfx deploy runs/go2-walk-v1 --robot go2 --mock
+```
+
+## Python API Reference
+
+### Go2Backend
+
+Low-level backend class (see `rfx/python/rfx/real/go2.py`):
+
+```python
+from rfx.real.go2 import Go2Backend
+from rfx.robot.config import GO2_CONFIG
+
+backend = Go2Backend(
+    config=GO2_CONFIG,
+    ip_address="192.168.123.161",
+    edu_mode=False,
+    hw_backend="rust",  # or "unitree", "auto"
+    zenoh_endpoint=None,  # optional: "tcp/192.168.123.161:7447"
+)
+
+# Check connection
+if backend.is_connected():
+    obs = backend.observe()
+    backend.act(action)
+
+backend.disconnect()
+```
+
+### High-Level Commands
+
+```python
+# Recovery stand
+backend.stand()
+
+# Sit down
+backend.sit()
+
+# Walk (sport mode only)
+backend.walk(vx=0.3, vy=0.0, vyaw=0.0)
+
+# Reset to standing
+backend.reset()
+
+# Go home (neutral position)
+backend.go_home()
+```
+
+## Configuration File
+
+Full config: `rfx/configs/go2.yaml`
+
+```yaml
+name: Unitree Go2
+urdf_path: rfx/assets/robots/go2/urdf/go2.urdf
+state_dim: 34      # 12 pos + 12 vel + 4 quat + 3 gyro + 3 acc
+action_dim: 12     # 12 joint position commands
+max_state_dim: 64
+max_action_dim: 64
+control_freq_hz: 200
+
+joints:
+  - {name: FR_hip, index: 0}
+  - {name: FR_thigh, index: 1}
+  - {name: FR_calf, index: 2}
+  - {name: FL_hip, index: 3}
+  - {name: FL_thigh, index: 4}
+  - {name: FL_calf, index: 5}
+  - {name: RR_hip, index: 6}
+  - {name: RR_thigh, index: 7}
+  - {name: RR_calf, index: 8}
+  - {name: RL_hip, index: 9}
+  - {name: RL_thigh, index: 10}
+  - {name: RL_calf, index: 11}
+
+hardware:
+  ip_address: 192.168.123.161
+  edu_mode: false
+```
+
+## Internal Architecture
+
+The Go2 backend uses a **Rust RobotNode** that wraps the hardware SDK:
+
+```python
+from rfx._rfx import RobotNode
+
+# Created internally by Go2Backend
+node = RobotNode.go2(
+    name="go2",
+    ip_address="192.168.123.161",
+    transport=transport,
+    edu_mode=False,
+    rate_hz=50.0,
+)
+
+# Subscribe to state
+state_sub = node.subscribe_state()
+
+# Send commands
+node.send_command([vx, vy, vyaw])  # sport mode
+node.send_command([...] * 12)      # EDU mode (12 joint positions)
+
+# Stop
+node.stop()
+```
+
+Key points:
+
+- State published on `rfx/go2/state`
+- Commands consumed from `rfx/go2/cmd`
+- All I/O flows through the **Zenoh transport pipeline**
+- Python reads state from `subscribe_state()` and sends commands via `send_command()`
+
+## Troubleshooting
+
+### Connection Refused
+
+If the robot is unreachable:
+
+1. Check network: `ping 192.168.123.161`
+2. Verify you're on the Go2's WiFi network
+3. Ensure the robot is powered on and initialized
+
+### Backend Import Error
+
+If you see `rfx Rust bindings not available`:
+
+```bash
+# Build the Rust extension
+cd rfx/crates/rfx-python
+maturin develop
+```
+
+### Legacy SDK Not Found
+
+If `unitree_sdk2py` backend fails:
+
+1. Ensure you're running on the robot's onboard computer
+2. Check `/unitree/module/pet_go` exists
+3. Verify system Python at `/usr/bin/python3` can import `unitree_sdk2py`
+
+### EDU Mode Not Working
+
+EDU mode requires:
+
+1. A valid Unitree Go2 EDU license
+2. The robot in EDU firmware mode
+3. `edu_mode=True` in the backend config
+
+Sport mode does **not** require a license and works out of the box.
+
+## Next Steps
+
+- [Deploy a policy](/workflows/deploy-policy) on the Go2
+- [Train a locomotion policy](/workflows/train-policy) with collected data
+- [Custom Robots](/hardware/custom-robots) - add your own hardware

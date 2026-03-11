@@ -1,0 +1,358 @@
+---
+title: Train Policies
+description: Train policies from collected demos or in simulation
+---
+
+rfx integrates seamlessly with [LeRobot](https://github.com/huggingface/lerobot) for training policies from demonstrations, and provides built-in GPU-accelerated simulation for RL workflows.
+
+## Training from Demonstrations (LeRobot)
+
+rfx datasets are LeRobot-compatible by default. Use LeRobot's training pipeline with your collected demos:
+
+<Steps>
+  <Step title="Collect or download demos">
+    ```bash
+    # Collect your own
+    rfx record --robot so101 --repo-id my-org/demos --episodes 50
+    
+    # Or download from Hub
+    huggingface-cli download my-org/demos --repo-type dataset --local-dir datasets/my-org/demos
+    ```
+  </Step>
+
+  <Step title="Install LeRobot">
+    ```bash
+    pip install lerobot
+    ```
+  </Step>
+
+  <Step title="Train with LeRobot">
+    ```bash
+    python -m lerobot.scripts.train \
+      policy=act \
+      dataset_repo_id=my-org/demos \
+      training.num_epochs=500 \
+      wandb.enable=true
+    ```
+  </Step>
+
+  <Step title="Deploy the trained policy">
+    ```bash
+    rfx deploy outputs/train/act/my-org/demos --robot so101
+    ```
+  </Step>
+</Steps>
+
+<Note>
+LeRobot supports multiple policy architectures: **ACT** (Action Chunking Transformer), **Diffusion Policy**, **VQ-BeT**, and more. See [LeRobot docs](https://huggingface.co/docs/lerobot) for architecture details.
+</Note>
+
+## Training in Simulation
+
+For reinforcement learning or sim-to-real transfer, use rfx's GPU-accelerated simulation:
+
+### Parallel Simulation Training
+
+```python
+import torch
+import torch.nn as nn
+import rfx
+from rfx.config import SO101_CONFIG
+
+# Define your policy
+class SimpleVLA(nn.Module):
+    def __init__(self, state_dim: int, action_dim: int):
+        super().__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(state_dim, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+        )
+        self.head = nn.Sequential(
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, action_dim),
+        )
+
+    def forward(self, obs: dict) -> torch.Tensor:
+        return self.head(self.encoder(obs["state"]))
+
+# Create parallel simulation
+robot = rfx.SimRobot.from_config(
+    SO101_CONFIG.to_dict(),
+    num_envs=4096,        # GPU-accelerated parallel envs
+    backend="genesis",    # or "mjx", "mock"
+    device="cuda",
+)
+
+policy = SimpleVLA(robot.max_state_dim, robot.max_action_dim).to("cuda")
+optimizer = torch.optim.AdamW(policy.parameters(), lr=3e-4)
+
+# Training loop
+target = torch.randn(4096, 6, device="cuda") * 0.5
+obs = robot.reset()
+
+for step in range(10000):
+    # Inference
+    action = policy(obs)
+    robot.act(action.detach())
+    new_obs = robot.observe()
+    
+    # Reward computation
+    positions = new_obs["state"][:, :6]
+    reward = -torch.norm(positions - target, dim=-1)
+    loss = -(reward.unsqueeze(-1) * action).mean()
+    
+    # Backward pass
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+    
+    # Reset terminated envs
+    done = robot.get_done()
+    if done.any():
+        robot.reset(done.nonzero().squeeze(-1))
+        target[done] = torch.randn(done.sum(), 6, device="cuda") * 0.5
+    
+    obs = new_obs
+    
+    if step % 100 == 0:
+        print(f"Step {step:6d} | loss={loss.item():8.4f} | reward={reward.mean().item():8.4f}")
+```
+
+<CodeGroup>
+
+```bash CLI
+# Run the training script
+uv run rfx/examples/train_vla.py --num_envs 4096 --steps 100000 --backend genesis
+```
+
+```python Python
+import rfx
+
+# Programmatic training
+stats = rfx.train(
+    config="so101.yaml",
+    num_envs=4096,
+    steps=100000,
+    backend="genesis",
+    device="cuda",
+)
+```
+
+</CodeGroup>
+
+## Simulation Backends
+
+rfx supports multiple physics backends:
+
+| Backend | Description | Best For |
+|---------|-------------|----------|
+| `mock` | Pure PyTorch, no physics | Fast prototyping, testing |
+| `genesis` | Genesis physics engine | GPU-accelerated parallel sim |
+| `mjx` | MuJoCo XLA | High-fidelity physics |
+
+```python
+# Choose your backend
+robot = rfx.SimRobot.from_config(
+    config="so101.yaml",
+    backend="genesis",  # or "mjx", "mock"
+    num_envs=4096,
+    device="cuda",
+)
+```
+
+## Saving Trained Models
+
+rfx policies are self-describing and portable:
+
+```python
+import rfx
+from rfx.config import SO101_CONFIG
+from rfx.utils.transforms import ObservationNormalizer
+
+# Train your policy...
+policy = SimpleVLA(64, 64)
+# ... training code ...
+
+# Save with metadata
+policy.save(
+    "runs/so101-pick-v1",
+    robot_config=SO101_CONFIG,
+    normalizer=normalizer,
+    training_info={
+        "total_steps": 50000,
+        "architecture": "SimpleVLA",
+        "backend": "genesis",
+        "num_envs": 4096,
+    }
+)
+```
+
+The saved directory contains:
+
+```
+runs/so101-pick-v1/
+├── rfx_config.json       # Architecture + robot + training metadata
+├── model.safetensors     # Weights in SafeTensors format
+└── normalizer.json       # Observation normalizer state (optional)
+```
+
+## Training Configuration
+
+### Hyperparameters
+
+```python
+config = {
+    "learning_rate": 3e-4,
+    "batch_size": 256,
+    "num_envs": 4096,
+    "horizon": 1000,
+    "gamma": 0.99,
+    "entropy_coef": 0.01,
+}
+```
+
+### Robot Configuration
+
+Specify robot parameters for simulation:
+
+```python
+from rfx.robot.config import RobotConfig
+
+config = RobotConfig(
+    name="so101",
+    state_dim=6,
+    action_dim=6,
+    max_state_dim=64,
+    max_action_dim=64,
+    control_freq_hz=50,
+    hardware={
+        "type": "serial",
+        "port": "/dev/ttyACM0",
+    },
+)
+
+# Use in simulation
+robot = rfx.SimRobot.from_config(
+    config.to_dict(),
+    num_envs=1024,
+    backend="genesis",
+)
+```
+
+## Domain Randomization
+
+For sim-to-real transfer, apply domain randomization:
+
+```python
+import torch
+
+def randomize_physics(robot, env_ids):
+    """Randomize physics parameters for given environments."""
+    # Randomize mass
+    mass_scale = torch.rand(len(env_ids)) * 0.4 + 0.8  # 0.8-1.2x
+    robot.set_mass_scale(env_ids, mass_scale)
+    
+    # Randomize friction
+    friction = torch.rand(len(env_ids)) * 0.5 + 0.5  # 0.5-1.0
+    robot.set_friction(env_ids, friction)
+
+# Apply during training
+if step % 1000 == 0:
+    randomize_physics(robot, torch.arange(robot.num_envs))
+```
+
+## Monitoring Training
+
+### WandB Integration (LeRobot)
+
+```bash
+python -m lerobot.scripts.train \
+  policy=act \
+  dataset_repo_id=my-org/demos \
+  wandb.enable=true \
+  wandb.project=rfx-training \
+  wandb.run_name=so101-pick-v1
+```
+
+### Manual Logging
+
+```python
+import wandb
+
+wandb.init(project="rfx-training", name="so101-pick-v1")
+
+for step in range(num_steps):
+    # ... training step ...
+    
+    wandb.log({
+        "loss": loss.item(),
+        "reward": reward.mean().item(),
+        "success_rate": success_rate,
+        "step": step,
+    })
+```
+
+## Curriculum Learning
+
+Progressively increase task difficulty:
+
+```python
+class CurriculumManager:
+    def __init__(self, initial_difficulty=0.1):
+        self.difficulty = initial_difficulty
+    
+    def update(self, success_rate):
+        if success_rate > 0.8:
+            self.difficulty = min(1.0, self.difficulty + 0.05)
+        elif success_rate < 0.3:
+            self.difficulty = max(0.1, self.difficulty - 0.05)
+    
+    def sample_target(self, num_envs):
+        # Sample targets based on difficulty
+        radius = 0.1 + (0.5 * self.difficulty)
+        return torch.randn(num_envs, 6) * radius
+
+curriculum = CurriculumManager()
+
+for step in range(num_steps):
+    # ... training code ...
+    
+    if step % 100 == 0:
+        success_rate = compute_success_rate()
+        curriculum.update(success_rate)
+        target = curriculum.sample_target(num_envs)
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Start Small">
+    Begin with 50-100 demos and a simple policy architecture. Scale up once you verify the pipeline works.
+  </Accordion>
+
+  <Accordion title="Data Quality > Quantity">
+    10 high-quality demos are better than 100 noisy ones. Ensure consistent, smooth demonstrations.
+  </Accordion>
+
+  <Accordion title="Validation Split">
+    Hold out 10-20% of episodes for validation to detect overfitting.
+  </Accordion>
+
+  <Accordion title="Checkpoint Regularly">
+    Save checkpoints every 10-50k steps. Training can be unstable, especially early on.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Deploy Policy" icon="rocket" href="/workflows/deploy-policy">
+    Deploy your trained policy to real hardware
+  </Card>
+  <Card title="Hub Integration" icon="cloud" href="/workflows/hub-integration">
+    Share your trained models on HuggingFace Hub
+  </Card>
+</CardGroup>

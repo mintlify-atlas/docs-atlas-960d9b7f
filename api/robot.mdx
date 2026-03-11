@@ -1,0 +1,340 @@
+---
+title: Robot API
+description: Core robot interface and configuration
+---
+
+The `rfx.robot` module provides the core interface for all robots, whether real or simulated.
+
+## Robot Protocol
+
+The entire robot interface. Real or simulated robots implement the same API.
+
+### Properties
+
+<ParamField path="num_envs" type="int">
+  Number of parallel environments (1 for real robots)
+</ParamField>
+
+<ParamField path="state_dim" type="int">
+  Actual state dimensionality (before padding)
+</ParamField>
+
+<ParamField path="action_dim" type="int">
+  Actual action dimensionality (before padding)
+</ParamField>
+
+<ParamField path="max_state_dim" type="int">
+  Padded state dim for multi-embodiment training
+</ParamField>
+
+<ParamField path="max_action_dim" type="int">
+  Padded action dim for multi-embodiment training
+</ParamField>
+
+<ParamField path="device" type="str">
+  Device for tensors ("cuda" or "cpu")
+</ParamField>
+
+### Methods
+
+#### observe()
+
+Get current observation as a dictionary of tensors.
+
+<ResponseField name="returns" type="dict[str, torch.Tensor]">
+  Dictionary containing:
+  - `state`: `(num_envs, max_state_dim)` - joint positions/velocities
+  - `images`: `(num_envs, num_cams, H, W, 3)` - RGB images (optional)
+  - `language`: `(num_envs, seq_len)` - tokenized instruction (optional)
+</ResponseField>
+
+```python
+robot = rfx.Robot.from_config("so101.yaml")
+obs = robot.observe()
+print(obs["state"].shape)  # (1, 64)
+```
+
+#### act(action)
+
+Execute an action on the robot.
+
+<ParamField path="action" type="torch.Tensor" required>
+  Action tensor with shape `(num_envs, max_action_dim)` or `(num_envs, horizon, max_action_dim)`
+</ParamField>
+
+```python
+import torch
+action = torch.zeros(1, 64)  # Zero action
+robot.act(action)
+```
+
+#### reset(env_ids=None)
+
+Reset environments and return initial observation.
+
+<ParamField path="env_ids" type="torch.Tensor | None">
+  `(N,)` tensor of environment indices to reset. If `None`, resets all environments.
+</ParamField>
+
+<ResponseField name="returns" type="dict[str, torch.Tensor]">
+  Initial observation dictionary (same format as `observe()`)
+</ResponseField>
+
+```python
+obs = robot.reset()  # Reset all environments
+obs = robot.reset(torch.tensor([0, 2]))  # Reset specific environments
+```
+
+## RobotBase
+
+Abstract base class for Robot implementations. Provides common functionality and enforces the interface.
+
+### Constructor
+
+```python
+RobotBase(
+    state_dim: int,
+    action_dim: int,
+    num_envs: int = 1,
+    max_state_dim: int = 64,
+    max_action_dim: int = 64,
+    device: str = "cpu"
+)
+```
+
+<ParamField path="state_dim" type="int" required>
+  Actual state dimensionality (e.g., 6 for SO-101)
+</ParamField>
+
+<ParamField path="action_dim" type="int" required>
+  Actual action dimensionality (e.g., 6 for SO-101)
+</ParamField>
+
+<ParamField path="num_envs" type="int" default="1">
+  Number of parallel environments
+</ParamField>
+
+<ParamField path="max_state_dim" type="int" default="64">
+  Padded state dimension for multi-embodiment training
+</ParamField>
+
+<ParamField path="max_action_dim" type="int" default="64">
+  Padded action dimension for multi-embodiment training
+</ParamField>
+
+<ParamField path="device" type="str" default="cpu">
+  Device for tensors ("cuda" or "cpu")
+</ParamField>
+
+### Class Methods
+
+#### from_config(config_path, **kwargs)
+
+Create a robot from a YAML config file.
+
+<ParamField path="config_path" type="str" required>
+  Path to YAML configuration file
+</ParamField>
+
+<ParamField path="**kwargs" type="dict">
+  Additional keyword arguments to override config values
+</ParamField>
+
+```python
+robot = RobotBase.from_config("so101.yaml", device="cuda")
+```
+
+## RobotConfig
+
+Configuration dataclass for a robot.
+
+<ParamField path="name" type="str" default="robot">
+  Human-readable name (e.g., "SO-101")
+</ParamField>
+
+<ParamField path="urdf_path" type="str | None" default="None">
+  Path to URDF file (for simulation)
+</ParamField>
+
+<ParamField path="state_dim" type="int" default="12">
+  Actual DOF for state
+</ParamField>
+
+<ParamField path="action_dim" type="int" default="6">
+  Actual DOF for actions
+</ParamField>
+
+<ParamField path="max_state_dim" type="int" default="64">
+  Pad state to this for multi-robot training
+</ParamField>
+
+<ParamField path="max_action_dim" type="int" default="64">
+  Pad action to this for multi-robot training
+</ParamField>
+
+<ParamField path="cameras" type="list[CameraConfig]" default="[]">
+  List of camera configurations
+</ParamField>
+
+<ParamField path="joints" type="list[JointConfig]" default="[]">
+  List of joint configurations
+</ParamField>
+
+<ParamField path="control_freq_hz" type="int" default="50">
+  Control loop frequency in Hz
+</ParamField>
+
+<ParamField path="hardware" type="dict[str, Any]" default="{}">
+  Hardware-specific settings (port, IP address, etc.)
+</ParamField>
+
+### Class Methods
+
+#### from_dict(d)
+
+Create from a dictionary.
+
+```python
+config = RobotConfig.from_dict({
+    "name": "SO-101",
+    "state_dim": 12,
+    "action_dim": 6
+})
+```
+
+#### from_yaml(path)
+
+Load from a YAML file.
+
+```python
+config = RobotConfig.from_yaml("configs/so101.yaml")
+```
+
+### Instance Methods
+
+#### to_dict()
+
+Convert to a dictionary.
+
+```python
+config_dict = config.to_dict()
+```
+
+## Pre-defined Configs
+
+Pre-configured robot configurations for common platforms:
+
+- `SO101_CONFIG` - SO-101 arm (6 DOF)
+- `GO2_CONFIG` - Unitree Go2 quadruped (12 DOF)
+- `G1_CONFIG` - Unitree G1 humanoid (29 DOF)
+- `INNATE_CONFIG` - Innate manipulation arm (6 DOF)
+
+```python
+from rfx.robot import SO101_CONFIG, GO2_CONFIG
+
+print(SO101_CONFIG.state_dim)  # 12
+print(GO2_CONFIG.action_dim)   # 12
+```
+
+## CameraConfig
+
+Configuration for a camera sensor.
+
+<ParamField path="name" type="str" default="camera">
+  Camera identifier
+</ParamField>
+
+<ParamField path="width" type="int" default="640">
+  Image width in pixels
+</ParamField>
+
+<ParamField path="height" type="int" default="480">
+  Image height in pixels
+</ParamField>
+
+<ParamField path="fps" type="int" default="30">
+  Frames per second
+</ParamField>
+
+<ParamField path="device_id" type="int | str" default="0">
+  Camera device ID or path
+</ParamField>
+
+## JointConfig
+
+Configuration for a single joint.
+
+<ParamField path="name" type="str" required>
+  Joint name
+</ParamField>
+
+<ParamField path="index" type="int" required>
+  Joint index in the robot's DOF array
+</ParamField>
+
+<ParamField path="position_min" type="float" default="-3.14159">
+  Minimum position limit (radians)
+</ParamField>
+
+<ParamField path="position_max" type="float" default="3.14159">
+  Maximum position limit (radians)
+</ParamField>
+
+<ParamField path="velocity_max" type="float" default="10.0">
+  Maximum velocity (rad/s)
+</ParamField>
+
+<ParamField path="effort_max" type="float" default="100.0">
+  Maximum effort/torque (Nm)
+</ParamField>
+
+## load_config()
+
+Load a robot configuration from a YAML file or dictionary.
+
+```python
+load_config(config_path: str | Path | dict[str, Any]) -> dict[str, Any]
+```
+
+<ParamField path="config_path" type="str | Path | dict[str, Any]" required>
+  Path to YAML config file, or a dictionary
+</ParamField>
+
+<ResponseField name="returns" type="dict[str, Any]">
+  Configuration dictionary
+</ResponseField>
+
+```python
+from rfx.robot import load_config
+
+config = load_config("so101.yaml")
+config = load_config({"state_dim": 12, "action_dim": 6})
+```
+
+## Example Usage
+
+```python
+import rfx
+from rfx.robot import RobotConfig, load_config
+
+# Method 1: Use pre-defined config
+from rfx.robot.lerobot import so101
+robot = so101()
+
+# Method 2: Load from YAML
+config = load_config("so101.yaml")
+robot = RobotBase.from_config(config)
+
+# Method 3: Create programmatically
+config = RobotConfig(
+    name="CustomRobot",
+    state_dim=12,
+    action_dim=6,
+    control_freq_hz=50
+)
+
+# Run a simple control loop
+obs = robot.observe()
+action = policy(obs)  # Your policy here
+robot.act(action)
+```

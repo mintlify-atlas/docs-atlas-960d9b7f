@@ -1,0 +1,307 @@
+---
+title: rfx doctor
+description: System diagnostics and environment validation for rfx
+---
+
+`rfx doctor` checks your development environment and verifies that all dependencies, hardware, and configurations are properly set up.
+
+## Basic Usage
+
+```bash
+rfx doctor
+```
+
+Runs a comprehensive check and prints a detailed report.
+
+## What It Checks
+
+`rfx doctor` validates:
+
+1. **Version Information** - rfx SDK, Python, platform
+2. **Required Tools** - python3, cargo, uv
+3. **Rust Extension** - rfx._rfx binary module
+4. **Core Python Packages** - tinygrad, numpy, PyYAML
+5. **Optional Packages** - PyTorch, LeRobot, OpenCV, Anthropic/OpenAI SDKs, MuJoCo
+6. **Transport Layer** - Zenoh (via Rust extension)
+7. **Robot Configs** - Validates all YAML files in `rfx/configs/`
+8. **Simulation Backends** - MockRobot, Genesis (GPU), MJX (JAX)
+9. **rfxJIT Backends** - CPU, CUDA, Metal availability
+10. **Hardware Detection** - Serial ports, connected robots, Zenoh environment variables
+
+## Example Output
+
+```
+[rfx] doctor
+
+  Version
+    rfx-sdk          0.2.0
+    Python           3.13.1
+    Platform         Linux-6.1.0-x86_64
+
+  Required tools
+    python3                              ok  /usr/bin/python3
+    cargo                                ok  /usr/local/bin/cargo
+    uv                                   ok  /usr/local/bin/uv
+
+  Rust extension
+    rfx._rfx                             ok  v0.2.0
+
+  Core Python packages
+    tinygrad                             ok  0.9.2
+    NumPy                                ok  2.0.1
+    PyYAML                               ok  6.0.1
+
+  Optional packages
+    PyTorch                              ok  2.5.1
+    LeRobot                              ok  0.2.0
+    OpenCV                               ok  4.10.0
+    Anthropic SDK                        ok  0.39.0
+    OpenAI SDK                           not available
+    MuJoCo                               ok  3.2.4
+
+  Transport
+    Zenoh (via Rust extension)           ok
+
+  Robot configs
+    so101.yaml                           ok
+    go2.yaml                             ok
+    g1.yaml                              ok
+
+  Simulation backends
+    MockRobot (torch)                    ok
+    Genesis (GPU)                        not available  requires genesis
+    MJX (JAX)                            ok
+
+  rfxJIT backends
+    cpu                                  ok
+    cuda                                 ok
+    metal                                not available
+
+  Hardware
+    /dev/ttyACM0                         ok  so101
+    /dev/ttyUSB0                         ok  unknown
+    RFX_ZENOH_CONNECT                    not set (using defaults)
+
+[rfx] All good. Ready to go.
+```
+
+## Exit Codes
+
+- **0**: All required components present
+- **0**: Some optional components missing (warnings only)
+
+`rfx doctor` returns 0 even if optional components are missing. It only fails (though currently returns 0 regardless) if **required** components are missing.
+
+## Check Categories
+
+### Required Components
+
+These must be present for rfx to function:
+
+- **python3**: Python 3.13+ interpreter
+- **cargo**: Rust toolchain (for building extensions)
+- **uv**: Modern Python package manager
+- **rfx._rfx**: Compiled Rust extension module
+- **Core packages**: tinygrad, numpy, PyYAML
+
+If any required component is missing, you'll see:
+
+```
+  python3                              missing
+  rfx._rfx                             missing  (run: maturin develop)
+```
+
+### Optional Components
+
+These enable additional functionality:
+
+- **PyTorch**: Neural network inference (most policies)
+- **LeRobot**: Dataset compatibility and utilities
+- **OpenCV**: Image processing and visualization
+- **Anthropic/OpenAI SDKs**: VLA and foundation model integration
+- **MuJoCo**: Physics simulation backend
+- **Genesis**: GPU-accelerated simulation
+
+Missing optional components show:
+
+```
+  OpenAI SDK                           not available
+  Genesis (GPU)                        not available  requires genesis
+```
+
+## Troubleshooting Common Issues
+
+### Rust Extension Missing
+
+```
+  rfx._rfx                             missing  (run: maturin develop)
+```
+
+**Fix**: Build the Rust extension:
+
+```bash
+cd rfx
+maturin develop --release
+```
+
+Or from source:
+
+```bash
+bash scripts/setup-from-source.sh
+```
+
+### No Serial Devices Found
+
+```
+  Hardware
+    No serial devices found
+```
+
+**Possible causes**:
+- Robot not connected
+- USB cable issue
+- Driver not installed (Windows)
+- Permission issue (Linux)
+
+**Linux fix** - Add user to dialout group:
+
+```bash
+sudo usermod -aG dialout $USER
+# Log out and back in
+```
+
+### Robot Config Invalid
+
+```
+  so101.yaml                           missing  (invalid motor config)
+```
+
+**Fix**: Check the YAML syntax and ensure all required fields are present. See the [Robot API documentation](/api/robot) for configuration details.
+
+### rfxJIT Backend Unavailable
+
+```
+  cuda                                 not available
+```
+
+**Fix**: Install PyTorch with CUDA support:
+
+```bash
+uv pip install torch --index-url https://download.pytorch.org/whl/cu121
+```
+
+### Transport Not Available
+
+```
+  Zenoh (via Rust extension)           not available  Rust extension not built
+```
+
+**Fix**: The Rust extension must be built with Zenoh support. Rebuild:
+
+```bash
+maturin develop --release
+```
+
+## Hardware Detection Details
+
+`rfx doctor` scans for connected robots:
+
+```python
+from rfx.robot.discovery import discover_ports
+
+ports = discover_ports()
+# Returns list of dicts: [{"port": "/dev/ttyACM0", "robot_type": "so101"}, ...]
+```
+
+For network-based robots (Go2, G1), it checks the `RFX_ZENOH_CONNECT` environment variable:
+
+```bash
+export RFX_ZENOH_CONNECT="tcp/192.168.1.120:7447"
+rfx doctor
+```
+
+Output:
+```
+  Hardware
+    RFX_ZENOH_CONNECT                ok  tcp/192.168.1.120:7447
+```
+
+## Using Doctor in CI/CD
+
+`rfx doctor` is useful in automated environments:
+
+```yaml
+# .github/workflows/test.yml
+- name: Check rfx environment
+  run: rfx doctor
+```
+
+Or in Docker:
+
+```dockerfile
+RUN uv pip install rfx-sdk && rfx doctor
+```
+
+## Interpreting the Report
+
+### All Good
+
+```
+[rfx] All good. Ready to go.
+```
+
+All required components are present. You can proceed with recording, training, and deployment.
+
+### Some Items Missing
+
+```
+[rfx] Some required items missing. See above.
+```
+
+Check the report for `missing` items and install them. Optional items marked `not available` are informational only.
+
+## Manual Checks
+
+You can manually verify specific components:
+
+### Check Python version
+
+```bash
+python3 --version
+```
+
+Should be 3.13 or higher.
+
+### Check Rust extension
+
+```python
+import rfx
+from rfx import _rfx
+print(_rfx.__version__)
+```
+
+### Check robot config
+
+```python
+from rfx.robot.config import load_config
+
+config = load_config("so101")
+print(config)
+```
+
+### Check serial ports
+
+```python
+from rfx.robot.discovery import discover_ports
+
+ports = discover_ports()
+for p in ports:
+    print(p)
+```
+
+## See Also
+
+- [Installation guide](/installation) - Install rfx from source
+- [Record command](/cli/record) - Collect demonstrations
+- [Deploy command](/cli/deploy) - Run policies on hardware
+- [Robot API](/api/robot) - Robot configuration and interface

@@ -1,0 +1,120 @@
+---
+title: "Introduction"
+description: "The robotics framework for the foundation model era"
+---
+
+<div style={{textAlign: 'center', padding: '3rem 0'}}>
+  <h1 style={{fontSize: '3rem', fontWeight: '700', marginBottom: '1.5rem', color: '#4595db'}}>
+    rfx
+  </h1>
+  <p style={{fontSize: '1.5rem', color: '#202124', marginBottom: '2rem'}}>
+    The robotics framework for the foundation model era
+  </p>
+  <p style={{fontSize: '1.125rem', color: '#5f6368', maxWidth: '42rem', margin: '0 auto 2rem'}}>
+    Built from scratch for the workflow of collect demos, train a policy, deploy, and iterate. 
+    Rust core for real-time control, Python SDK for fast research.
+  </p>
+</div>
+
+## Three commands. Any robot. Any policy.
+
+```bash
+rfx record --robot so101 --repo-id my-org/demos --episodes 10
+rfx deploy runs/my-policy --robot so101
+rfx deploy hf://user/my-policy --robot go2 --duration 60
+```
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running with rfx in minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install rfx with pip, uv, or from source
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/overview">
+    Learn the three-command CLI
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/robot">
+    Explore the Python SDK
+  </Card>
+</CardGroup>
+
+## Why rfx?
+
+ROS was built for message passing between components. We're in a different era — the workflow is **collect demos, train a policy, deploy, iterate**. rfx is built from scratch for that loop.
+
+<CardGroup cols={2}>
+  <Card title="Three commands" icon="command">
+    `rfx record`, `rfx deploy`, `rfx doctor` — that's the whole CLI
+  </Card>
+  <Card title="Three-method robot interface" icon="robot">
+    `observe()`, `act()`, `reset()` — same API for sim and real
+  </Card>
+  <Card title="Self-describing models" icon="database">
+    Save once, load anywhere, deploy with zero config
+  </Card>
+  <Card title="HuggingFace Hub native" icon="cloud">
+    Push and pull policies like you push datasets
+  </Card>
+  <Card title="Rust core" icon="bolt">
+    Real-time control with zero overhead
+  </Card>
+  <Card title="Zenoh transport" icon="network-wired">
+    Invisible plumbing, there when you need it
+  </Card>
+</CardGroup>
+
+## Supported Hardware
+
+<CardGroup cols={3}>
+  <Card title="SO-101" icon="hand">
+    6-DOF robotic arm with USB serial interface
+  </Card>
+  <Card title="Unitree Go2" icon="dog">
+    Quadruped robot with Ethernet/Zenoh transport
+  </Card>
+  <Card title="Custom Robots" icon="wrench">
+    Implement observe()/act()/reset() or write a YAML config
+  </Card>
+</CardGroup>
+
+## Key Features
+
+<AccordionGroup>
+  <Accordion title="Unified Robot Interface">
+    Every robot — simulated or real — implements three methods: `observe()`, `act()`, and `reset()`. 
+    Same API across hardware platforms and simulation backends.
+  </Accordion>
+  
+  <Accordion title="Self-Describing Models">
+    Every saved model is a self-describing directory with architecture, robot config, normalizer state, and training metadata. 
+    Load anywhere, deploy with zero configuration.
+  </Accordion>
+  
+  <Accordion title="Multiple Simulation Backends">
+    Support for Genesis, MuJoCo MJX, and Mock backends. Same robot interface across all simulators.
+  </Accordion>
+  
+  <Accordion title="HuggingFace Hub Integration">
+    Push and pull policies from HuggingFace Hub. Deploy directly from Hub URLs with `rfx deploy hf://user/policy`.
+  </Accordion>
+  
+  <Accordion title="Real-Time Control">
+    Rust core with Python bindings via PyO3. Control loop with rate control, jitter tracking, and clean shutdown.
+  </Accordion>
+  
+  <Accordion title="LeRobot Dataset Integration">
+    Native support for LeRobot dataset format. Record demonstrations and push to HuggingFace Hub.
+  </Accordion>
+</AccordionGroup>
+
+## Community
+
+<CardGroup cols={2}>
+  <Card title="GitHub" icon="github" href="https://github.com/quantbagel/rfx">
+    Source code, issues, and discussions
+  </Card>
+  <Card title="Discord" icon="discord" href="https://discord.gg/xV8bAGM8WT">
+    Join the community chat
+  </Card>
+</CardGroup>

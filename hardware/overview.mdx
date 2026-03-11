@@ -1,0 +1,181 @@
+---
+title: Hardware Overview
+description: Supported robots, connection methods, and hardware integration in rfx
+---
+
+## Supported Hardware
+
+rfx supports multiple robot platforms out of the box, with a unified three-method interface (`observe()`, `act()`, `reset()`) across all hardware and simulation backends.
+
+| Robot | Type | Interface | Control Freq | Status |
+|-------|------|-----------|--------------|--------|
+| **SO-101** | 6-DOF arm | USB serial (Rust driver) | 50 Hz | Ready |
+| **Unitree Go2** | Quadruped | Ethernet (Zenoh transport) | 200 Hz | Ready |
+| **Unitree G1** | Humanoid | Ethernet (Zenoh transport) | 50 Hz | In progress |
+| **Innate** | Manipulation arm | Zenoh topics | 50 Hz | Ready |
+
+## Connection Architecture
+
+rfx uses different transport layers depending on the robot:
+
+### USB Serial (SO-101)
+
+```python
+from rfx import RealRobot
+
+# Auto-detect port
+robot = RealRobot.from_config("so101.yaml")
+
+# Explicit port
+robot = RealRobot.from_config("so101.yaml", port="/dev/ttyACM0")
+```
+
+The SO-101 backend uses a **Rust RobotNode** that handles the serial connection and publishes state/commands over a Zenoh transport pipeline. Python never touches serial directly—all I/O goes through the transport layer.
+
+### Ethernet / Zenoh (Go2, G1, Innate)
+
+```python
+from rfx import RealRobot
+
+# Go2 with default IP
+robot = RealRobot.from_config("go2.yaml")
+
+# Go2 with custom IP
+robot = RealRobot.from_config("go2.yaml", ip_address="192.168.123.161")
+
+# Multi-machine setup with explicit Zenoh router
+robot = RealRobot.from_config(
+    "go2.yaml",
+    zenoh_endpoint="tcp/192.168.123.161:7447"
+)
+```
+
+Quadrupeds and humanoids communicate over Ethernet using the **Zenoh transport pipeline**. The Rust RobotNode wraps hardware-specific SDKs and exposes a uniform state/command interface.
+
+## Unified Robot Interface
+
+Every robot in rfx—whether real or simulated—implements the same three-method interface:
+
+```python
+obs = robot.observe()    # {"state": Tensor(1, 64), "images": ...}
+robot.act(action)        # Tensor(1, 64)
+robot.reset()
+```
+
+### Observation Format
+
+Observations are dictionaries with standardized keys:
+
+- **`state`**: Joint positions + velocities (+ IMU data for legged robots)
+  - Shape: `(num_envs, max_state_dim)`
+  - Padded to `max_state_dim=64` for multi-embodiment compatibility
+- **`images`**: Optional camera feeds
+  - Shape: `(num_envs, num_cameras, C, H, W)`
+
+### Action Format
+
+Actions are tensors with shape `(num_envs, max_action_dim)`, padded to `max_action_dim=64`.
+
+- **Position control** (SO-101, G1): Target joint positions
+- **Velocity control** (Go2 sport mode): `[vx, vy, vyaw]` padded to 64 dims
+- **Torque control** (Go2 EDU mode): Target joint torques
+
+## Auto-Discovery
+
+rfx can auto-detect connected hardware:
+
+### Single SO-101 Arm
+
+```python
+from rfx.real import So101Robot
+
+robot = So101Robot()  # auto-discovers /dev/ttyACM0 or similar
+```
+
+### Leader-Follower SO-101 Pair
+
+```python
+from rfx.real import So101LeaderFollower
+
+teleop = So101LeaderFollower()  # auto-discovers both ports
+teleop.run()  # mirrors leader arm to follower
+```
+
+On first run with two SO-101 arms, rfx launches an **interactive mapping wizard** that guides you through plugging in the leader and follower to establish persistent port identity. The mapping is saved to `~/.config/rfx/so101_port_map.json`.
+
+<Tip>
+Set `RFX_SO101_INTERACTIVE_MAP=0` to disable the wizard and use deterministic port assignment.
+</Tip>
+
+## Hardware Configuration Files
+
+Robot configurations are defined in YAML files under `rfx/configs/`:
+
+```yaml
+name: SO-101
+state_dim: 12      # 6 positions + 6 velocities
+action_dim: 6      # 6 joint position commands
+max_state_dim: 64
+max_action_dim: 64
+control_freq_hz: 50
+
+joints:
+  - name: shoulder_pan
+    index: 0
+    position_min: -3.14159
+    position_max: 3.14159
+  # ... more joints
+
+hardware:
+  port: /dev/ttyACM0
+  baudrate: 1000000
+```
+
+See [Custom Robots](/hardware/custom-robots) for details on creating your own configurations.
+
+## Backend Selection
+
+For robots with multiple backend options (like Go2), you can choose the communication layer:
+
+```python
+# Rust/Zenoh backend (default, recommended)
+robot = RealRobot.from_config("go2.yaml", hw_backend="rust")
+
+# Legacy unitree_sdk2py backend
+robot = RealRobot.from_config("go2.yaml", hw_backend="unitree")
+
+# Auto-detect (tries Rust first, falls back to legacy)
+robot = RealRobot.from_config("go2.yaml", hw_backend="auto")
+```
+
+Set the `RFX_GO2_BACKEND` environment variable to override the default:
+
+```bash
+export RFX_GO2_BACKEND=rust  # force Zenoh transport
+```
+
+## Troubleshooting
+
+### Check Hardware Connectivity
+
+```bash
+rfx doctor-so101  # check SO-101 serial ports and dependencies
+```
+
+### Test Without Hardware
+
+Use `MockRobot` to validate control loops before connecting real hardware:
+
+```python
+from rfx import MockRobot
+
+robot = MockRobot(state_dim=12, action_dim=6)
+obs = robot.observe()
+robot.act(torch.zeros(1, 64))
+```
+
+See the next sections for robot-specific setup guides:
+
+- [SO-101 6-DOF Arm](/hardware/so101)
+- [Unitree Go2 Quadruped](/hardware/go2)
+- [Custom Robots](/hardware/custom-robots)

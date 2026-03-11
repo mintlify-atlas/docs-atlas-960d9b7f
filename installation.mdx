@@ -1,0 +1,385 @@
+---
+title: Installation
+description: Install rfx using pip, uv, or from source
+---
+
+Choose your installation method based on your needs. For most users, pip or uv installation is recommended. Install from source if you're developing rfx itself or need the latest unreleased features.
+
+## Prerequisites
+
+<CardGroup cols={3}>
+  <Card title="Python 3.13+" icon="python">
+    Required for all installation methods
+  </Card>
+  <Card title="Rust toolchain" icon="rust">
+    Required for source installation only
+  </Card>
+  <Card title="uv (optional)" icon="zap">
+    Faster package management
+  </Card>
+</CardGroup>
+
+### System requirements
+
+- **Python**: 3.13 or 3.14
+- **Operating System**: Linux, macOS, or Windows (Linux recommended for hardware)
+- **Rust**: 1.70+ (source installation only)
+
+## Quick install
+
+For most users, install the published package from PyPI:
+
+<CodeGroup>
+```bash uv (recommended)
+uv pip install rfx-sdk
+```
+
+```bash pip
+pip install rfx-sdk
+```
+</CodeGroup>
+
+This installs:
+- Core Python package (`rfx`)
+- Rust extension for real-time control
+- Essential dependencies (tinygrad, numpy, PyYAML)
+- CLI tool (`rfx` command)
+
+<Note>
+**Why uv?** uv is a fast Python package installer written in Rust. It's significantly faster than pip and handles dependency resolution more reliably.
+
+Install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+</Note>
+
+## Optional dependencies
+
+rfx has several optional feature groups. Install only what you need:
+
+### Simulation backends
+
+<CodeGroup>
+```bash Genesis (GPU-accelerated)
+uv pip install "rfx-sdk[sim-genesis]"
+```
+
+```bash MJX (JAX-based)
+uv pip install "rfx-sdk[sim-mjx]"
+```
+
+```bash Mock (CPU-only, zero deps)
+uv pip install "rfx-sdk[sim-mock]"
+```
+
+```bash All simulation backends
+uv pip install "rfx-sdk[sim]"
+```
+</CodeGroup>
+
+**Simulation dependencies:**
+- `sim-genesis`: torch, genesis-world ≥0.4.0 (GPU recommended)
+- `sim-mjx`: torch, mujoco ≥3.0, jax[cuda13], warp-lang
+- `sim-mock`: torch only (runs on CPU)
+
+### Teleoperation and data collection
+
+```bash
+uv pip install "rfx-sdk[teleop]"
+```
+
+Includes:
+- opencv-python ≥4.8 (camera capture)
+- torch ≥2.2
+- mcap ≥1.1.0 (logging)
+
+### LeRobot integration
+
+```bash
+uv pip install "rfx-sdk[collection]"
+```
+
+Enables:
+- Direct export to LeRobot datasets
+- HuggingFace Hub push/pull
+- Compatible with `lerobot` package
+
+### LLM agent integration
+
+```bash
+uv pip install "rfx-sdk[agent]"
+```
+
+Provides:
+- anthropic ≥0.25.0 (Claude)
+- openai ≥1.0.0 (GPT)
+
+### Development tools
+
+```bash
+uv pip install "rfx-sdk[dev]"
+```
+
+Includes:
+- pytest ≥7.0, pytest-asyncio
+- ruff ≥0.1 (linting and formatting)
+- mypy ≥1.0 (type checking)
+- pre-commit ≥3.6
+
+### All optional features
+
+Install everything:
+
+```bash
+uv pip install "rfx-sdk[all]"
+```
+
+<Warning>
+The `[all]` extra includes GPU libraries (JAX, CUDA) which may require specific driver versions. Install only the features you need for smaller, faster installs.
+</Warning>
+
+## Install from source
+
+For development or bleeding-edge features:
+
+<Steps>
+
+### Clone the repository
+
+```bash
+git clone https://github.com/quantbagel/rfx.git
+cd rfx
+```
+
+### Run the setup script
+
+The setup script handles everything automatically:
+
+```bash
+bash scripts/setup-from-source.sh
+```
+
+This script:
+1. Creates a virtual environment at `.venv/`
+2. Installs development requirements from `requirements-dev.txt`
+3. Installs rfx in editable mode (`pip install -e`)
+4. Fetches Rust dependencies
+5. Probes available backends (CUDA, Metal)
+6. Configures git hooks for quality checks
+
+### Activate the environment
+
+```bash
+source .venv/bin/activate
+```
+
+### Verify the installation
+
+```bash
+rfx doctor
+```
+
+</Steps>
+
+### Custom virtual environment path
+
+Override the default `.venv` location:
+
+```bash
+RFX_VENV_PATH=/path/to/venv bash scripts/setup-from-source.sh
+```
+
+### Manual source installation
+
+If you prefer to install manually:
+
+```bash
+# Create and activate virtualenv
+uv venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+uv pip install -r requirements-dev.txt
+
+# Install rfx in editable mode
+uv pip install -e .
+
+# Fetch Rust dependencies
+cargo fetch
+```
+
+## Run without installation
+
+Use `uv run` to execute rfx commands without installing:
+
+```bash
+uv run rfx deploy runs/my-policy --robot so101
+uv run rfx record --robot so101 --repo-id demos --episodes 10
+```
+
+This is useful for:
+- Quick testing without environment setup
+- Running examples from the repo
+- CI/CD pipelines
+
+## Verify installation
+
+Check that everything is working:
+
+```bash
+rfx doctor
+```
+
+**Expected output:**
+
+```
+[rfx] doctor
+
+  Version
+    rfx-sdk          0.2.0
+    Python           3.13.x
+    Platform         Linux-x.x.x
+
+  Required tools
+    python3          ok  /usr/bin/python3
+    cargo            ok  /usr/bin/cargo
+    uv               ok  /usr/bin/uv
+
+  Rust extension
+    rfx._rfx         ok  v0.2.0
+
+  Core Python packages
+    tinygrad         ok  0.9.0
+    NumPy            ok  1.26.0
+    PyYAML           ok  6.0
+
+  Optional packages
+    PyTorch          ok  2.2.0
+    LeRobot          not available
+    OpenCV           ok  4.8.0
+    ...
+
+  Simulation backends
+    MockRobot        ok
+    Genesis (GPU)    not available  requires genesis
+    MJX (JAX)        not available  requires mujoco
+
+[rfx] All good. Ready to go.
+```
+
+<Note>
+`not available` for optional packages is normal. Only install what you need.
+</Note>
+
+## Troubleshooting
+
+### Rust extension not found
+
+If `rfx doctor` reports `rfx._rfx missing`:
+
+```bash
+# Rebuild the Rust extension
+maturin develop
+```
+
+### Backend probe fails
+
+If GPU backends (CUDA, Metal) don't appear:
+
+1. Check that you have appropriate drivers installed
+2. Install tinygrad runtime support:
+   ```bash
+   pip install tinygrad[cuda]  # for NVIDIA
+   pip install tinygrad[metal]  # for Apple Silicon
+   ```
+3. Verify with:
+   ```python
+   from rfxJIT.runtime import available_backends
+   print(available_backends())
+   ```
+
+### Import errors
+
+If you see `ModuleNotFoundError: No module named 'rfx'`:
+
+1. Ensure you activated the virtual environment
+2. Reinstall in editable mode: `uv pip install -e .`
+3. Check that you're in the repo root directory
+
+### Serial port permissions (Linux)
+
+For hardware access, add your user to the `dialout` group:
+
+```bash
+sudo usermod -a -G dialout $USER
+# Log out and back in for changes to take effect
+```
+
+## Development setup
+
+For contributors or those modifying rfx source:
+
+### Enable git hooks
+
+Setup pre-commit hooks for quality gates:
+
+```bash
+./scripts/setup-git-hooks.sh
+```
+
+This configures:
+- `pre-commit`: Rust format check + Ruff on staged files
+- `pre-push`: Full test suite (Rust + Python)
+
+To block accidental pushes to main:
+
+```bash
+RFX_BLOCK_MAIN_PUSH=1 ./scripts/setup-git-hooks.sh
+```
+
+### Use Moon task runner
+
+rfx uses Moon for monorepo task orchestration:
+
+```bash
+# Run all checks
+moon run :format
+moon run :lint
+moon run :typecheck
+moon run :test
+moon run :build
+```
+
+See `.moon/workspace.yml` for configuration.
+
+### Manual quality checks
+
+Without Moon, use the Python checks script:
+
+```bash
+scripts/python-checks.sh lint
+scripts/python-checks.sh typecheck
+scripts/python-checks.sh test
+scripts/python-checks.sh ci  # all checks
+```
+
+For full mypy package check:
+
+```bash
+RFX_TYPECHECK_FULL=1 scripts/python-checks.sh typecheck-full
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get your first policy running in minutes
+  </Card>
+  <Card title="SO-101 Setup" icon="robot" href="/hardware/so101">
+    Configure your SO-101 robotic arm
+  </Card>
+  <Card title="Simulation" icon="cube" href="/simulation/overview">
+    Set up simulation backends
+  </Card>
+  <Card title="Python SDK" icon="code" href="/api/robot">
+    Explore the API reference
+  </Card>
+</CardGroup>

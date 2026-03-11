@@ -1,0 +1,149 @@
+---
+title: Simulation Overview
+description: Run rfx in simulation without robot hardware for development, testing, and training
+---
+
+## Introduction
+
+rfx provides multiple simulation backends that allow you to develop, test, and train robot policies without physical hardware. All simulation backends implement the same unified `SimRobot` interface, making it easy to switch between simulation and real hardware.
+
+## When to Use Simulation
+
+<CardGroup cols={2}>
+  <Card title="Development" icon="code">
+    Test control logic and algorithms locally without hardware access
+  </Card>
+  <Card title="Training" icon="brain">
+    Train RL policies with thousands of parallel environments on GPU
+  </Card>
+  <Card title="Testing" icon="flask">
+    Unit test your robot code with MockRobot (no dependencies required)
+  </Card>
+  <Card title="Validation" icon="check">
+    Verify policy behavior before deploying to real hardware
+  </Card>
+</CardGroup>
+
+## Quickstart
+
+The fastest way to get started is with the Genesis backend:
+
+```bash
+uv pip install --python 3.13 torch
+uv run --python 3.13 rfx/examples/genesis_viewer.py --auto-install
+```
+
+<Note>
+Genesis currently requires Python 3.13 or earlier. Python 3.14 support is pending upstream wheel releases.
+</Note>
+
+## Minimal Python API
+
+All simulation backends use the same interface:
+
+```python
+from rfx.sim import SimRobot
+
+# Create a simulated robot
+robot = SimRobot.from_config(
+    "rfx/configs/so101.yaml",
+    backend="genesis",      # or "mjx" or "mock"
+    num_envs=1,
+    viewer=True,
+    auto_install=True,
+)
+
+# Use the same API as real robots
+obs = robot.reset()
+action = torch.zeros(1, robot.max_action_dim)
+robot.act(action)
+obs = robot.observe()
+```
+
+## Available Backends
+
+rfx supports three simulation backends:
+
+<AccordionGroup>
+  <Accordion title="Genesis - GPU-accelerated physics" icon="rocket">
+    Fast parallel simulation on GPU with built-in visualization.
+    
+    **Install:** `uv pip install genesis-world`
+    
+    **Best for:** Parallel RL training, rapid prototyping
+  </Accordion>
+  
+  <Accordion title="MuJoCo MJX - JAX-based simulation" icon="lightning">
+    JAX-accelerated MuJoCo with JIT compilation support.
+    
+    **Install:** `pip install mujoco mujoco-mjx jax[cuda]`
+    
+    **Best for:** Advanced RL research, custom gradients
+  </Accordion>
+  
+  <Accordion title="Mock - Pure PyTorch testing" icon="vial">
+    Lightweight CPU backend with no external dependencies.
+    
+    **Install:** Built-in (no extra dependencies)
+    
+    **Best for:** Unit testing, CI/CD, quick experiments
+  </Accordion>
+</AccordionGroup>
+
+## Simulation vs Real Hardware
+
+The unified API makes switching between simulation and real hardware seamless:
+
+<CodeGroup>
+```python Simulation
+from rfx.sim import SimRobot
+
+robot = SimRobot.from_config(
+    "rfx/configs/so101.yaml",
+    backend="genesis",
+    num_envs=4096,  # Parallel environments
+)
+```
+
+```python Real Hardware
+from rfx import Robot
+
+robot = Robot.from_config(
+    "rfx/configs/so101.yaml",
+    mode="real",
+)
+```
+</CodeGroup>
+
+Both use identical methods:
+- `robot.observe()` - Get current state
+- `robot.act(action)` - Send control commands  
+- `robot.reset()` - Reset to initial state
+
+## Common Configuration
+
+Control simulation behavior with optional parameters:
+
+```python
+robot = SimRobot.from_config(
+    "rfx/configs/so101.yaml",
+    backend="genesis",
+    num_envs=1024,          # Number of parallel environments
+    viewer=True,            # Enable 3D visualization
+    device="cuda",          # Device placement
+    dt=0.002,               # Timestep override
+    substeps=4,             # Physics substeps per control step
+    auto_install=True,      # Auto-install backend if missing
+)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Backend Details" icon="gears" href="/simulation/backends">
+    Learn about Genesis, MuJoCo MJX, and Mock backends
+  </Card>
+  <Card title="MockRobot for Testing" icon="vial" href="/simulation/mock-robot">
+    Use MockRobot for unit tests without dependencies
+  </Card>
+</CardGroup>
