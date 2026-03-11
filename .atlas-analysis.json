@@ -1,0 +1,149 @@
+{
+  "projectType": "framework",
+  "projectName": "rfx",
+  "projectDescription": "A high-performance robotics framework for the foundation model era, built with Rust core and Python SDK.",
+  "theme": "aspen",
+  "primaryColor": "#4595db",
+  "lightColor": "#5ebf9e",
+  "darkColor": "#0494dc",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/robot-interface",
+              "concepts/policies",
+              "concepts/observations",
+              "concepts/control-loop"
+            ]
+          },
+          {
+            "group": "CLI Reference",
+            "pages": [
+              "cli/overview",
+              "cli/record",
+              "cli/deploy",
+              "cli/doctor"
+            ]
+          },
+          {
+            "group": "Hardware",
+            "pages": [
+              "hardware/overview",
+              "hardware/so101",
+              "hardware/go2",
+              "hardware/custom-robots"
+            ]
+          },
+          {
+            "group": "Simulation",
+            "pages": [
+              "simulation/overview",
+              "simulation/backends",
+              "simulation/mock-robot"
+            ]
+          },
+          {
+            "group": "Workflows",
+            "pages": [
+              "workflows/collect-demos",
+              "workflows/train-policy",
+              "workflows/deploy-policy",
+              "workflows/hub-integration"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "advanced/custom-drivers",
+              "advanced/skills-system",
+              "advanced/rfxjit",
+              "advanced/rust-core"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core",
+            "pages": [
+              "api/robot",
+              "api/session",
+              "api/deploy"
+            ]
+          },
+          {
+            "group": "Data Collection",
+            "pages": [
+              "api/collection",
+              "api/teleop"
+            ]
+          },
+          {
+            "group": "Models & Policies",
+            "pages": [
+              "api/hub",
+              "api/nn",
+              "api/decorators"
+            ]
+          },
+          {
+            "group": "Simulation",
+            "pages": [
+              "api/sim",
+              "api/envs"
+            ]
+          },
+          {
+            "group": "Utilities",
+            "pages": [
+              "api/utils",
+              "api/transforms",
+              "api/drivers"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Three-command CLI for record, deploy, and diagnostics",
+    "Unified robot interface with observe(), act(), reset()",
+    "Self-describing models with HuggingFace Hub integration",
+    "Rust core for real-time control with Python SDK",
+    "Support for SO-101 arm, Unitree Go2 quadruped, and custom robots",
+    "Multiple simulation backends (Genesis, MuJoCo MJX, Mock)",
+    "JIT compiler for high-performance kernel execution",
+    "LeRobot dataset integration for data collection"
+  ],
+  "publicApiSurface": [
+    "rfx.deploy()",
+    "rfx.load_policy()",
+    "rfx.push_policy()",
+    "rfx.Robot.observe()",
+    "rfx.Robot.act()",
+    "rfx.Robot.reset()",
+    "@rfx.policy",
+    "rfx.MotorCommands",
+    "rfx.Session",
+    "rfx.SimRobot",
+    "rfx.MockRobot",
+    "rfx.So101Robot",
+    "rfx.collection.collect()",
+    "rfx.run_control_loop()",
+    "rfx CLI: record, deploy, doctor"
+  ]
+}
